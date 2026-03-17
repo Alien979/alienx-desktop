@@ -1,0 +1,317 @@
+.session-manager-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.session-manager {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-secondary);
+}
+
+.session-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Save Section */
+.save-section {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-secondary);
+}
+
+.save-section h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.save-form {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.save-input {
+  flex: 1;
+  padding: 0.6rem 0.9rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.save-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.save-btn {
+  padding: 0.6rem 1.2rem;
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: var(--accent-primary-hover);
+}
+
+.save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.save-btn.saving {
+  background: var(--accent-yellow);
+  color: var(--bg-primary);
+}
+
+.save-btn.success {
+  background: var(--accent-green);
+}
+
+.save-btn.error {
+  background: var(--accent-red);
+}
+
+.save-info {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Sessions Section */
+.sessions-section {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 1.5rem;
+}
+
+.sessions-section h3 {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.no-sessions {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-muted);
+}
+
+.no-sessions-icon {
+  font-size: 2.5rem;
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.no-sessions p {
+  margin: 0.25rem 0;
+}
+
+.no-sessions-hint {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.sessions-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.session-item:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+}
+
+.session-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.session-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edit-name-input {
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-primary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.session-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.session-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 0.75rem;
+}
+
+.action-btn {
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.action-btn.load:hover {
+  border-color: var(--accent-primary);
+}
+
+.action-btn.rename:hover {
+  border-color: var(--accent-yellow);
+}
+
+.action-btn.delete:hover {
+  border-color: var(--accent-red);
+}
+
+.action-btn.delete.confirm {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: var(--accent-red);
+  animation: pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Storage Info */
+.storage-info {
+  padding: 0.75rem 1.5rem;
+  border-top: 1px solid var(--border-primary);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.storage-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.storage-used {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-purple));
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.storage-text {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.session-privacy-note {
+  padding: 0.75rem 1.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-primary);
+}

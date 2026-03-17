@@ -1,0 +1,128 @@
+.error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  padding: 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.error-boundary-content {
+  background: white;
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  max-width: 600px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.error-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.error-boundary h2,
+.error-boundary h3 {
+  color: #2d3748;
+  margin: 0 0 1rem 0;
+}
+
+.error-boundary h2 {
+  font-size: 1.75rem;
+}
+
+.error-boundary h3 {
+  font-size: 1.5rem;
+}
+
+.error-message {
+  color: #4a5568;
+  font-size: 1rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f7fafc;
+  border-radius: 6px;
+  border-left: 4px solid #fc8181;
+}
+
+.error-details {
+  margin: 1.5rem 0;
+  text-align: left;
+}
+
+.error-details summary {
+  cursor: pointer;
+  color: #667eea;
+  font-weight: 600;
+  padding: 0.5rem;
+  user-select: none;
+}
+
+.error-details summary:hover {
+  color: #764ba2;
+}
+
+.error-details pre {
+  background: #2d3748;
+  color: #e2e8f0;
+  padding: 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.error-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin: 2rem 0 1rem 0;
+}
+
+.error-actions button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.retry-button {
+  background: #667eea;
+  color: white;
+}
+
+.retry-button:hover {
+  background: #5a67d8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.reload-button {
+  background: #edf2f7;
+  color: #4a5568;
+}
+
+.reload-button:hover {
+  background: #e2e8f0;
+  transform: translateY(-1px);
+}
+
+.error-help {
+  color: #718096;
+  font-size: 0.875rem;
+  margin-top: 1rem;
+}
+
+/* Specialized error boundary styles */
+.error-boundary.file-error {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.error-boundary.analysis-error {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}

@@ -1,0 +1,68 @@
+.platform-chooser {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.platform-chooser-inner {
+  width: min(900px, 100%);
+  text-align: center;
+}
+
+.platform-chooser-inner h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+
+.platform-chooser .subtitle {
+  margin: 0.6rem 0 1.8rem;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+.platform-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.platform-choice {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.02)
+  );
+  border-radius: 14px;
+  padding: 1.2rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.platform-choice:hover {
+  transform: translateY(-2px);
+  border-color: rgba(0, 200, 255, 0.5);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.platform-choice .icon {
+  font-size: 1.5rem;
+}
+
+.platform-choice .title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+
+.platform-choice .desc {
+  font-size: 0.88rem;
+  color: var(--text-secondary, #b4b4b4);
+}

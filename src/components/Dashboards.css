@@ -1,0 +1,85 @@
+.dashboards-page {
+  min-height: 100vh;
+  padding: 2rem;
+  background: var(--bg-primary);
+}
+
+.dashboards-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid var(--border-primary);
+}
+
+.dashboards-header h1 {
+  font-size: 2.5rem;
+  color: var(--accent-blue);
+  margin: 0;
+}
+
+.back-button {
+  padding: 0.75rem 1.5rem;
+  background: var(--accent-blue-bg);
+  border: 1px solid var(--accent-blue);
+  color: var(--accent-blue);
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.back-button:hover {
+  background: rgba(96, 165, 250, 0.2);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 2rem;
+}
+
+.chart-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-secondary);
+  backdrop-filter: blur(10px);
+}
+
+.chart-card h3 {
+  margin: 0 0 1rem 0;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+.hint {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  text-align: center;
+  font-style: italic;
+}
+
+@media (max-width: 768px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboards-header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .back-button {
+    width: 100%;
+    text-align: center;
+  }
+}

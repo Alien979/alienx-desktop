@@ -1,0 +1,45 @@
+{
+  "name": "alienx",
+  "private": true,
+  "version": "1.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run sync:sigma && npm run bundle:sigma && npm run bundle:yara && npm run generate:samples && tsc && vite build",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "preview": "vite preview",
+    "sync:sigma": "node scripts/sync-sigma.js",
+    "sync:yara": "node scripts/sync-yara-rules.js",
+    "bundle:sigma": "node scripts/bundle-sigma-rules.js",
+    "bundle:yara": "node scripts/bundle-yara-rules.js",
+    "generate:samples": "node scripts/generate-samples-manifest.js",
+    "refresh:rules": "npm run sync:sigma && npm run sync:yara && npm run bundle:sigma && npm run bundle:yara && npm run generate:samples"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "@google/genai": "^1.30.0",
+    "@tauri-apps/api": "^2.10.1",
+    "@types/js-yaml": "^4.0.9",
+    "js-yaml": "^4.1.1",
+    "jspdf": "^3.0.4",
+    "jszip": "^3.10.1",
+    "openai": "^4.28.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.0.1",
+    "recharts": "^2.10.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@typescript-eslint/eslint-plugin": "^6.14.0",
+    "@typescript-eslint/parser": "^6.14.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "glob": "^13.0.0",
+    "typescript": "^5.2.2",
+    "vite": "^7.2.4"
+  }
+}

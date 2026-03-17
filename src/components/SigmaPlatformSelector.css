@@ -1,0 +1,291 @@
+.platform-selector {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+  padding: 2rem;
+  color: #e4e4e7;
+}
+
+.platform-header {
+  max-width: 900px;
+  margin: 0 auto 2rem;
+}
+
+.platform-header .back-button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  margin-bottom: 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.platform-header .back-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e4e4e7;
+}
+
+.platform-header .header-content {
+  text-align: center;
+}
+
+.platform-header .logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.platform-header .logo-container h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #e4e4e7;
+  margin: 0;
+}
+
+.platform-header .logo-icon {
+  font-size: 2rem;
+}
+
+.platform-header .tagline {
+  color: #71717a;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.platform-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  max-width: 900px;
+  margin: 0 auto 2rem;
+}
+
+.platform-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.platform-card:hover,
+.platform-card.hovered {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.platform-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.platform-card.disabled:hover {
+  transform: none;
+}
+
+/* Platform-specific accent colors */
+.platform-card.windows:hover,
+.platform-card.windows.hovered {
+  border-color: #0078d4;
+  box-shadow: 0 4px 20px rgba(0, 120, 212, 0.2);
+}
+
+.platform-card.linux:hover,
+.platform-card.linux.hovered {
+  border-color: #e95420;
+  box-shadow: 0 4px 20px rgba(233, 84, 32, 0.2);
+}
+
+.platform-card.macos:hover,
+.platform-card.macos.hovered {
+  border-color: #a3aaae;
+  box-shadow: 0 4px 20px rgba(163, 170, 174, 0.2);
+}
+
+.platform-card.cloud:hover,
+.platform-card.cloud.hovered {
+  border-color: #ff9900;
+  box-shadow: 0 4px 20px rgba(255, 153, 0, 0.2);
+}
+
+.platform-card.network:hover,
+.platform-card.network.hovered {
+  border-color: #22c55e;
+  box-shadow: 0 4px 20px rgba(34, 197, 94, 0.2);
+}
+
+.platform-icon {
+  font-size: 2.5rem;
+  flex-shrink: 0;
+}
+
+.platform-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.platform-content h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #e4e4e7;
+  margin: 0 0 0.25rem;
+}
+
+.platform-content p {
+  font-size: 0.875rem;
+  color: #71717a;
+  margin: 0 0 0.75rem;
+  line-height: 1.4;
+  min-height: 2.8em; /* Ensures 2 lines of text height for alignment */
+}
+
+.rule-count {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.rule-count .count {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #60a5fa;
+}
+
+.rule-count .label {
+  font-size: 0.75rem;
+  color: #52525b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.platform-arrow {
+  font-size: 1.5rem;
+  color: #3f3f46;
+  transition: all 0.2s ease;
+}
+
+.platform-card:hover .platform-arrow,
+.platform-card.hovered .platform-arrow {
+  color: #60a5fa;
+  transform: translateX(4px);
+}
+
+.platform-note {
+  text-align: center;
+  color: #52525b;
+  font-size: 0.875rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.platform-filters {
+  max-width: 900px;
+  margin: 1.5rem auto 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.filters-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.filters-header h4 {
+  margin: 0;
+  color: #e4e4e7;
+}
+
+.filter-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  color: #71717a;
+  margin: 0 0 0.2rem 0;
+}
+
+.filter-sub {
+  margin: 0.2rem 0 0 0;
+  color: #52525b;
+  font-size: 0.9rem;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.filter-actions button {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e4e4e7;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+.filter-actions button:hover {
+  border-color: #60a5fa;
+  color: #60a5fa;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+
+.filter-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  color: #e4e4e7;
+  font-weight: 600;
+}
+
+.filter-chip input {
+  accent-color: #60a5fa;
+}
+
+.filter-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #71717a;
+}
+
+.load-button {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.load-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
