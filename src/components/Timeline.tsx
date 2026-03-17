@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { SigmaRuleMatch } from "../lib/sigma/types";
 import { getSeverityColor } from "../lib/sigmaRules";
 import "./Timeline.css";
@@ -112,6 +112,12 @@ export default function Timeline({ matches, onBack }: TimelineProps) {
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
   const [bucketVisibleCount, setBucketVisibleCount] =
     useState(BUCKET_PAGE_SIZE);
+
+  // Clear expanded rows whenever a different bucket is selected so stale
+  // expand state from the previous bucket doesn't bleed into the new one.
+  useEffect(() => {
+    setExpandedEvents(new Set());
+  }, [selectedBucket]);
 
   // Filter state
   const [filters, setFilters] = useState<TimelineFilters>({
@@ -537,6 +543,14 @@ export default function Timeline({ matches, onBack }: TimelineProps) {
                         className="bar-segment low"
                         style={{
                           height: `${(bucket.bySeverity.low / bucket.events.length) * 100}%`,
+                        }}
+                      />
+                    )}
+                    {bucket.bySeverity.informational > 0 && (
+                      <div
+                        className="bar-segment informational"
+                        style={{
+                          height: `${(bucket.bySeverity.informational / bucket.events.length) * 100}%`,
                         }}
                       />
                     )}

@@ -12,6 +12,12 @@ import FileBreakdownStats from "./FileBreakdownStats";
 import { EventDetailsModal } from "./EventDetailsModal";
 import { MitreHeatmap } from "./MitreHeatmap";
 import { MultiFileComparison } from "./MultiFileComparison";
+import {
+  getSigmaReviewMap,
+  upsertSigmaReviewNote,
+  SigmaReviewStatus,
+} from "../lib/sigmaReviewNotes";
+import { THREAT_HUNT_PLAYBOOKS } from "../lib/threatHuntPlaybooks";
 import "./SigmaDetections.css";
 
 // ============================================================================
@@ -93,6 +99,7 @@ interface SigmaDetectionsProps {
   onMatchesUpdate?: (matches: Map<string, SigmaRuleMatch[]>) => void;
   cachedMatches?: Map<string, SigmaRuleMatch[]>;
   sourceFiles?: string[];
+  playbookFilterId?: string | null;
 }
 
 export default function SigmaDetections({
@@ -101,6 +108,7 @@ export default function SigmaDetections({
   onMatchesUpdate,
   cachedMatches,
   sourceFiles,
+  playbookFilterId,
 }: SigmaDetectionsProps) {
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
   const [matches, setMatches] = useState<Map<string, SigmaRuleMatch[]>>(
@@ -128,6 +136,10 @@ export default function SigmaDetections({
   const containerRef = useRef<HTMLDivElement>(null);
   const [matchesVisiblePerRule, setMatchesVisiblePerRule] = useState<
     Record<string, number>
+  >({});
+  const [reviewNotes, setReviewNotes] = useState(() => getSigmaReviewMap());
+  const [draftReview, setDraftReview] = useState<
+    Record<string, { status: SigmaReviewStatus; note: string }>
   >({});
   const lastProgressUpdateRef = useRef(0);
 
@@ -308,9 +320,27 @@ export default function SigmaDetections({
 
   // Filter matches by selected file
   const filteredMatches = useMemo(() => {
-    if (!selectedFile) return sortedMatches;
+    let baseMatches = sortedMatches;
 
-    return sortedMatches
+    if (playbookFilterId) {
+      const playbook = THREAT_HUNT_PLAYBOOKS.find(
+        (p) => p.id === playbookFilterId,
+      );
+      if (playbook) {
+        baseMatches = baseMatches.filter(([, ruleMatches]) => {
+          const tags = ruleMatches[0]?.rule.tags || [];
+          const combined =
+            `${ruleMatches[0]?.rule.title || ""} ${tags.join(" ")}`.toLowerCase();
+          return playbook.sigmaTagKeywords.some((keyword) =>
+            combined.includes(keyword.toLowerCase()),
+          );
+        });
+      }
+    }
+
+    if (!selectedFile) return baseMatches;
+
+    return baseMatches
       .map(([ruleId, ruleMatches]) => {
         const filtered = ruleMatches.filter(
           (match) => match.event.sourceFile === selectedFile,
@@ -318,7 +348,7 @@ export default function SigmaDetections({
         return [ruleId, filtered] as [string, SigmaRuleMatch[]];
       })
       .filter(([, ruleMatches]) => ruleMatches.length > 0);
-  }, [sortedMatches, selectedFile]);
+  }, [sortedMatches, selectedFile, playbookFilterId]);
 
   // Tooltip positioning is now handled by CSS (position: absolute)
   // No JavaScript positioning needed - tooltip stays relative to its wrapper element
@@ -535,6 +565,11 @@ export default function SigmaDetections({
 
               const rule = ruleMatches[0].rule;
               const isExpanded = expandedRule === ruleId;
+              const review = reviewNotes.get(rule.id);
+              const draft = draftReview[rule.id] || {
+                status: review?.status || "unreviewed",
+                note: review?.note || "",
+              };
 
               const level = rule.level || "medium";
 
@@ -681,12 +716,96 @@ export default function SigmaDetections({
                           ))}
                         </span>
                       )}
+                      {review && (
+                        <span className="tag" title={review.note || "Reviewed"}>
+                          Review: {review.status.replace("_", " ")}
+                        </span>
+                      )}
                     </div>
                   </div>
 
                   {/* Expandable Details */}
                   {isExpanded && (
                     <div className="match-details">
+                      <div
+                        style={{
+                          marginBottom: "0.8rem",
+                          padding: "0.75rem",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 8,
+                          background: "rgba(255,255,255,0.03)",
+                        }}
+                      >
+                        <h5 style={{ margin: "0 0 0.5rem" }}>Rule Review</h5>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <select
+                            value={draft.status}
+                            onChange={(e) =>
+                              setDraftReview((prev) => ({
+                                ...prev,
+                                [rule.id]: {
+                                  ...draft,
+                                  status: e.target.value as SigmaReviewStatus,
+                                },
+                              }))
+                            }
+                          >
+                            <option value="unreviewed">Unreviewed</option>
+                            <option value="reviewed">Reviewed</option>
+                            <option value="false_positive">
+                              False Positive
+                            </option>
+                            <option value="confirmed">Confirmed</option>
+                          </select>
+                          <input
+                            value={draft.note}
+                            onChange={(e) =>
+                              setDraftReview((prev) => ({
+                                ...prev,
+                                [rule.id]: {
+                                  ...draft,
+                                  note: e.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="Analyst note"
+                            style={{
+                              flex: 1,
+                              minWidth: 220,
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px solid rgba(255,255,255,0.14)",
+                              borderRadius: 6,
+                              color: "#e5e7eb",
+                              padding: "6px 8px",
+                            }}
+                          />
+                          <button
+                            className="expand-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const saved = upsertSigmaReviewNote({
+                                ruleId: rule.id,
+                                status: draft.status,
+                                note: draft.note,
+                              });
+                              setReviewNotes((prev) => {
+                                const next = new Map(prev);
+                                next.set(saved.ruleId, saved);
+                                return next;
+                              });
+                            }}
+                          >
+                            Save Review
+                          </button>
+                        </div>
+                      </div>
                       <h4>Matched Events ({ruleMatches.length})</h4>
                       <div className="matched-events">
                         {ruleMatches

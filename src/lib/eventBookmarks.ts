@@ -22,10 +22,26 @@ export interface EventBookmark {
 
 const STORAGE_KEY = "alienx_bookmarks";
 
+function isEventBookmark(value: unknown): value is EventBookmark {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.eventIndex === "number" &&
+    typeof v.timestamp === "string" &&
+    typeof v.eventId === "string" &&
+    typeof v.note === "string" &&
+    typeof v.tag === "string" &&
+    typeof v.createdAt === "string"
+  );
+}
+
 export function getBookmarks(): EventBookmark[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isEventBookmark);
   } catch {
     return [];
   }

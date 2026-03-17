@@ -22,6 +22,7 @@ const LazyProcessExecutionDashboard = lazy(
 const LazyTimeline = lazy(() => import("./components/Timeline"));
 const LazyRawLogsView = lazy(() => import("./components/RawLogsView"));
 const LazyLLMAnalysis = lazy(() => import("./components/LLMAnalysis"));
+const LazyRarityAnalysis = lazy(() => import("./components/RarityAnalysis"));
 import SessionManager from "./components/SessionManager";
 import BookmarkPanel from "./components/BookmarkPanel";
 import { EventDetailsModal } from "./components/EventDetailsModal";
@@ -35,6 +36,11 @@ import { SigmaRuleMatch } from "./lib/sigma/types";
 import type { YaraRuleMatch, YaraScanStats } from "./lib/yara";
 import type { SigmaPlatform } from "./lib/sigma/utils/autoLoadRules";
 import SigmaDetections from "./components/SigmaDetections";
+import {
+  saveAutoSession,
+  loadAutoSession,
+  clearAutoSession,
+} from "./lib/sessionStorage";
 import {
   ErrorBoundary,
   FileOperationErrorBoundary,
@@ -74,6 +80,11 @@ function App() {
   const [showSessionManager, setShowSessionManager] = useState(false);
   const [showBookmarkPanel, setShowBookmarkPanel] = useState(false);
   const [pivotEvent, setPivotEvent] = useState<LogEntry | null>(null);
+  const [activePlaybookId, setActivePlaybookId] = useState<string | null>(null);
+  const [playbookQuery, setPlaybookQuery] = useState("");
+  const [autosaveAvailableAt, setAutosaveAvailableAt] = useState<string | null>(
+    null,
+  );
   const [bookmarkCount, setBookmarkCount] = useState(
     () => getBookmarks().length,
   );
@@ -88,6 +99,34 @@ function App() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("alienx-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    const autosave = loadAutoSession();
+    if (autosave?.savedAt) {
+      setAutosaveAvailableAt(autosave.savedAt);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!parsedData) return;
+
+    const persist = () => {
+      saveAutoSession(
+        filename,
+        selectedPlatform || parsedData.platform,
+        parsedData,
+        sigmaMatches,
+      );
+      setAutosaveAvailableAt(new Date().toISOString());
+    };
+
+    const id = setInterval(persist, 30000);
+    window.addEventListener("blur", persist);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("blur", persist);
+    };
+  }, [parsedData, filename, selectedPlatform, sigmaMatches]);
 
   // Periodically refresh bookmark count (storage events don't fire on same tab)
   useEffect(() => {
@@ -111,7 +150,161 @@ function App() {
     });
   }, []);
 
+  const handleFileLoaded = (data: ParsedData, name: string) => {
+    ruleLoadRequestIdRef.current += 1;
+    clearVTCache(); // Clear stale VT results from previous file
+    setAnalysisPlatform(data.platform);
+    setParsedData(data);
+    setFilename(name);
+    setSigmaHasRun(false);
+    setSigmaMatches(new Map());
+    setSelectedPlatform(null);
+    setYaraMatches(null);
+    setYaraStats(null);
+    setActivePlaybookId(null);
+    setPlaybookQuery("");
+    setCurrentView("select");
+  };
+
+  const handleReset = useCallback(() => {
+    ruleLoadRequestIdRef.current += 1;
+    setAnalysisPlatform(null);
+    setParsedData(null);
+    setFilename("");
+    setAnalysisMode(null);
+    setSigmaMatches(new Map());
+    setSigmaHasRun(false);
+    setSelectedPlatform(null);
+    setYaraMatches(null);
+    setYaraStats(null);
+    setActivePlaybookId(null);
+    setPlaybookQuery("");
+    // Clear loaded rules from engine
+    sigmaEngine.clearRules();
+    setCurrentView("upload");
+  }, [sigmaEngine]);
+
+  const handleAnalysisSelect = useCallback(
+    (mode: AnalysisMode) => {
+      if (
+        parsedData?.platform === "linux" &&
+        (mode === "process-analysis" ||
+          mode === "timeline" ||
+          mode === "event-correlation")
+      ) {
+        return;
+      }
+
+      if (mode === "sigma") {
+        // If analysis already ran for current rules/platform, go directly to analysis.
+        // This includes valid zero-match runs.
+        if (sigmaHasRun && selectedPlatform) {
+          setAnalysisMode("sigma");
+          setCurrentView("analysis");
+        } else {
+          setCurrentView("sigma-platform");
+        }
+      } else {
+        setAnalysisMode(mode);
+        setCurrentView("analysis");
+      }
+    },
+    [parsedData, sigmaHasRun, selectedPlatform],
+  );
+
+  const handlePlatformSelect = async (
+    platform: SigmaPlatform,
+    categories: string[],
+  ) => {
+    const requestId = ++ruleLoadRequestIdRef.current;
+    setSelectedPlatform(platform);
+    setRulesLoading(true);
+
+    // Clear any previously loaded rules
+    sigmaEngine.clearRules();
+    setSigmaMatches(new Map());
+    setSigmaHasRun(false);
+    setRuleLoadProgress(null);
+
+    try {
+      // Load rules for selected platform with progress tracking
+      const { autoLoadRules } = await import("./lib/sigma/utils/autoLoadRules");
+      const loadResult = await autoLoadRules(
+        sigmaEngine,
+        platform,
+        (loaded, total) => {
+          if (ruleLoadRequestIdRef.current !== requestId) return;
+          setRuleLoadProgress({ loaded, total });
+        },
+        categories,
+      );
+
+      if (ruleLoadRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      if (loadResult.errors.length > 0) {
+        console.warn(
+          `[SIGMA] ${loadResult.loaded} rules loaded, ${loadResult.failed} failed. Errors:`,
+          loadResult.errors.slice(0, 20),
+        );
+      }
+      console.log(
+        `[SIGMA] Successfully loaded ${loadResult.loaded} rules (${loadResult.failed} failed)`,
+      );
+
+      setRulesLoading(false);
+      setRuleLoadProgress(null);
+
+      // Switch to analysis view only after rules are loaded
+      setAnalysisMode("sigma");
+      setCurrentView("analysis");
+    } catch (err) {
+      if (ruleLoadRequestIdRef.current !== requestId) {
+        return;
+      }
+      console.error("[SIGMA] Rule loading failed:", err);
+      setRulesLoading(false);
+      setRuleLoadProgress(null);
+      // Stay on platform selector so user can retry
+    }
+  };
+
+  const handleBackToSelector = useCallback(() => {
+    setCurrentView("select");
+    setAnalysisMode(null);
+  }, []);
+
+  const handleBackFromPlatformSelector = useCallback(() => {
+    ruleLoadRequestIdRef.current += 1;
+    setRulesLoading(false);
+    setRuleLoadProgress(null);
+    setCurrentView("select");
+  }, []);
+
+  const handlePlaybookSelect = useCallback(
+    (playbookId: string, suggestedQuery: string) => {
+      setActivePlaybookId(playbookId);
+      setPlaybookQuery(suggestedQuery);
+      handleAnalysisSelect("sigma");
+    },
+    [handleAnalysisSelect],
+  );
+
+  const handleRestoreAutosave = useCallback(() => {
+    const autosave = loadAutoSession();
+    if (!autosave) return;
+    setAnalysisPlatform(autosave.data.platform);
+    setParsedData(autosave.data);
+    setFilename(autosave.filename);
+    setSelectedPlatform(autosave.platform as SigmaPlatform | null);
+    setSigmaMatches(autosave.matches);
+    setSigmaHasRun(true);
+    setCurrentView("select");
+  }, []);
+
   // ── Global keyboard shortcuts ────────────────────────────────
+  // Declared after handlers so const references resolve without TDZ errors.
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       // Ignore when user is typing in an input / textarea
@@ -178,6 +371,10 @@ function App() {
               e.preventDefault();
               handleAnalysisSelect("ioc-extraction");
               break;
+            case "a":
+              e.preventDefault();
+              handleAnalysisSelect("rarity-analysis");
+              break;
             case "e":
               e.preventDefault();
               handleAnalysisSelect("event-correlation");
@@ -191,9 +388,10 @@ function App() {
       parsedData,
       showShortcutsHelp,
       toggleTheme,
-      sigmaMatches,
-      selectedPlatform,
-      sigmaHasRun,
+      handleBackToSelector,
+      handleBackFromPlatformSelector,
+      handleReset,
+      handleAnalysisSelect,
     ],
   );
 
@@ -201,131 +399,6 @@ function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
-
-  const handleFileLoaded = (data: ParsedData, name: string) => {
-    ruleLoadRequestIdRef.current += 1;
-    clearVTCache(); // Clear stale VT results from previous file
-    setAnalysisPlatform(data.platform);
-    setParsedData(data);
-    setFilename(name);
-    setSigmaHasRun(false);
-    setSigmaMatches(new Map());
-    setSelectedPlatform(null);
-    setYaraMatches(null);
-    setYaraStats(null);
-    setCurrentView("select");
-  };
-
-  const handleReset = () => {
-    ruleLoadRequestIdRef.current += 1;
-    setAnalysisPlatform(null);
-    setParsedData(null);
-    setFilename("");
-    setAnalysisMode(null);
-    setSigmaMatches(new Map());
-    setSigmaHasRun(false);
-    setSelectedPlatform(null);
-    setYaraMatches(null);
-    setYaraStats(null);
-    // Clear loaded rules from engine
-    sigmaEngine.clearRules();
-    setCurrentView("upload");
-  };
-
-  const handleAnalysisSelect = (mode: AnalysisMode) => {
-    if (
-      parsedData?.platform === "linux" &&
-      (mode === "process-analysis" ||
-        mode === "timeline" ||
-        mode === "event-correlation")
-    ) {
-      return;
-    }
-
-    if (mode === "sigma") {
-      // If analysis already ran for current rules/platform, go directly to analysis.
-      // This includes valid zero-match runs.
-      if (sigmaHasRun && selectedPlatform) {
-        setAnalysisMode("sigma");
-        setCurrentView("analysis");
-      } else {
-        setCurrentView("sigma-platform");
-      }
-    } else {
-      setAnalysisMode(mode);
-      setCurrentView("analysis");
-    }
-  };
-
-  const handlePlatformSelect = async (
-    platform: SigmaPlatform,
-    categories: string[],
-  ) => {
-    const requestId = ++ruleLoadRequestIdRef.current;
-    setSelectedPlatform(platform);
-    setRulesLoading(true);
-
-    // Clear any previously loaded rules
-    sigmaEngine.clearRules();
-    setSigmaMatches(new Map());
-    setSigmaHasRun(false);
-    setRuleLoadProgress(null);
-
-    try {
-      // Load rules for selected platform with progress tracking
-      const { autoLoadRules } = await import("./lib/sigma/utils/autoLoadRules");
-      const loadResult = await autoLoadRules(
-        sigmaEngine,
-        platform,
-        (loaded, total) => {
-          if (ruleLoadRequestIdRef.current !== requestId) return;
-          setRuleLoadProgress({ loaded, total });
-        },
-        categories,
-      );
-
-      if (ruleLoadRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      if (loadResult.errors.length > 0) {
-        console.warn(
-          `[SIGMA] ${loadResult.loaded} rules loaded, ${loadResult.failed} failed. Errors:`,
-          loadResult.errors.slice(0, 20),
-        );
-      }
-      console.log(
-        `[SIGMA] Successfully loaded ${loadResult.loaded} rules (${loadResult.failed} failed)`,
-      );
-
-      setRulesLoading(false);
-      setRuleLoadProgress(null);
-
-      // Switch to analysis view only after rules are loaded
-      setAnalysisMode("sigma");
-      setCurrentView("analysis");
-    } catch (err) {
-      if (ruleLoadRequestIdRef.current !== requestId) {
-        return;
-      }
-      console.error("[SIGMA] Rule loading failed:", err);
-      setRulesLoading(false);
-      setRuleLoadProgress(null);
-      // Stay on platform selector so user can retry
-    }
-  };
-
-  const handleBackToSelector = () => {
-    setCurrentView("select");
-    setAnalysisMode(null);
-  };
-
-  const handleBackFromPlatformSelector = () => {
-    ruleLoadRequestIdRef.current += 1;
-    setRulesLoading(false);
-    setRuleLoadProgress(null);
-    setCurrentView("select");
-  };
 
   const handleCustomRulesLoaded = async (count: number) => {
     console.log(`Loaded ${count} custom SIGMA rules`);
@@ -353,6 +426,8 @@ function App() {
     setSelectedPlatform(platform as SigmaPlatform | null);
     setSigmaMatches(matches);
     setSigmaHasRun(true);
+    setActivePlaybookId(null);
+    setPlaybookQuery("");
     setCurrentView("select");
     // Note: conversation history will be handled by LLMAnalysis when it mounts
     // For now, we don't persist it in App state
@@ -398,6 +473,7 @@ function App() {
           onOpenSessions={() => setShowSessionManager(true)}
           sigmaMatches={sigmaMatches}
           platform={selectedPlatform || parsedData.platform}
+          onSelectPlaybook={handlePlaybookSelect}
         />
       </ErrorBoundary>
     );
@@ -440,7 +516,20 @@ function App() {
             setYaraMatches(matches);
             setYaraStats(stats);
           }}
+          playbookFilterId={activePlaybookId}
         />
+      </AnalysisErrorBoundary>
+    );
+  } else if (analysisMode === "rarity-analysis") {
+    content = (
+      <AnalysisErrorBoundary>
+        <Suspense
+          fallback={
+            <LoadingState message="Loading rarity analysis..." fullPage />
+          }
+        >
+          <LazyRarityAnalysis data={parsedData} onBack={handleBackToSelector} />
+        </Suspense>
       </AnalysisErrorBoundary>
     );
   } else if (analysisMode === "dashboards") {
@@ -497,6 +586,7 @@ function App() {
             filename={filename}
             onBack={handleBackToSelector}
             sigmaMatches={sigmaMatches}
+            initialSearchQuery={playbookQuery}
           />
         </Suspense>
       </ErrorBoundary>
@@ -585,6 +675,40 @@ function App() {
 
   return (
     <div className="app">
+      {!parsedData && autosaveAvailableAt && (
+        <div
+          style={{
+            position: "fixed",
+            top: 12,
+            right: 12,
+            zIndex: 2200,
+            background: "rgba(15,23,42,0.92)",
+            border: "1px solid rgba(96,165,250,0.35)",
+            borderRadius: 8,
+            padding: "8px 10px",
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <span style={{ color: "#cbd5e1", fontSize: "0.78rem" }}>
+            Autosave available (
+            {new Date(autosaveAvailableAt).toLocaleTimeString()})
+          </span>
+          <button className="timeline-button" onClick={handleRestoreAutosave}>
+            Restore
+          </button>
+          <button
+            className="timeline-button"
+            onClick={() => {
+              clearAutoSession();
+              setAutosaveAvailableAt(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="app-main">{content}</div>
 
       {/* Theme toggle button */}
@@ -699,6 +823,7 @@ function App() {
                   ["Ctrl+Shift+T", "Open Timeline"],
                   ["Ctrl+Shift+R", "Open Raw Logs"],
                   ["Ctrl+Shift+I", "Open IOC Extraction"],
+                  ["Ctrl+Shift+A", "Open Rarity Analysis"],
                   ["Ctrl+Shift+E", "Open Event Correlation"],
                 ].map(([key, desc]) => (
                   <tr key={key}>
@@ -766,6 +891,7 @@ interface SigmaAnalysisViewProps {
     matches: YaraRuleMatch[],
     stats: YaraScanStats | null,
   ) => void;
+  playbookFilterId?: string | null;
 }
 
 function SigmaAnalysisView({
@@ -782,6 +908,7 @@ function SigmaAnalysisView({
   cachedYaraMatches,
   cachedYaraStats,
   onYaraMatchesUpdate,
+  playbookFilterId,
 }: SigmaAnalysisViewProps) {
   // Skip loading screen - rules load in background
   return (
@@ -796,6 +923,7 @@ function SigmaAnalysisView({
       cachedYaraMatches={cachedYaraMatches}
       cachedYaraStats={cachedYaraStats}
       onYaraMatchesUpdate={onYaraMatchesUpdate}
+      playbookFilterId={playbookFilterId}
     />
   );
 }

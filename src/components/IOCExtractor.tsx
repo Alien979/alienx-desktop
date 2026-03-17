@@ -22,6 +22,14 @@ import {
   clearAbuseIPDBKey,
   exportSTIX,
 } from "../lib/iocEnrichment";
+import {
+  addThreatActorIOC,
+  createThreatActor,
+  deleteThreatActor,
+  deleteThreatActorIOC,
+  getThreatActors,
+  ThreatActorProfile,
+} from "../lib/threatActorRepo";
 import { IOCPivotView } from "./IOCPivotView";
 import "./IOCExtractor.css";
 
@@ -271,6 +279,22 @@ export default function IOCExtractor({
   // Pivot functionality state
   const [pivotIOC, setPivotIOC] = useState<ExtractedIOC | null>(null);
 
+  // Threat actor repository state
+  const [threatActors, setThreatActors] = useState<ThreatActorProfile[]>(() =>
+    getThreatActors(),
+  );
+  const [selectedThreatActorId, setSelectedThreatActorId] =
+    useState<string>("");
+  const [newThreatActorName, setNewThreatActorName] = useState("");
+  const [newThreatActorAliases, setNewThreatActorAliases] = useState("");
+  const [newThreatActorDescription, setNewThreatActorDescription] =
+    useState("");
+  const [newActorIOCType, setNewActorIOCType] = useState<IOCType>("ip");
+  const [newActorIOCValue, setNewActorIOCValue] = useState("");
+  const [newActorIOCNote, setNewActorIOCNote] = useState("");
+  const [threatRepoError, setThreatRepoError] = useState<string | null>(null);
+  const [feedName, setFeedName] = useState("Imported Feed");
+
   // Progressive loading for IOC lists per type
   const IOC_PAGE_SIZE = 100;
   const [iocVisiblePerType, setIocVisiblePerType] = useState<
@@ -430,6 +454,42 @@ export default function IOCExtractor({
 
     return groups;
   }, [filteredIOCs]);
+
+  const actorMatchSummaries = useMemo(() => {
+    const observed = new Map<string, number>();
+    for (const ioc of extractedIOCs) {
+      observed.set(`${ioc.type}:${ioc.value.toLowerCase()}`, ioc.count);
+    }
+
+    return threatActors.map((actor) => {
+      let matched = 0;
+      let totalHits = 0;
+      for (const ioc of actor.iocs) {
+        const key = `${ioc.type}:${ioc.value.toLowerCase()}`;
+        const hits = observed.get(key) || 0;
+        if (hits > 0) {
+          matched += 1;
+          totalHits += hits;
+        }
+      }
+      return {
+        actorId: actor.id,
+        matched,
+        totalIocs: actor.iocs.length,
+        totalHits,
+      };
+    });
+  }, [threatActors, extractedIOCs]);
+
+  const knownIOCSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const actor of threatActors) {
+      for (const ioc of actor.iocs) {
+        set.add(`${ioc.type}:${ioc.value.toLowerCase()}`);
+      }
+    }
+    return set;
+  }, [threatActors]);
 
   // Stats
   const stats = useMemo(() => {
@@ -651,14 +711,14 @@ export default function IOCExtractor({
       const result = await lookupAbuseIPDB(ip, key);
       setEnrichResults((prev) => new Map(prev).set(rk, result));
     } catch (err) {
-      console.error('AbuseIPDB lookup failed:', err);
+      console.error("AbuseIPDB lookup failed:", err);
       setEnrichResults((prev) =>
         new Map(prev).set(rk, {
-          source: 'abuseipdb' as const,
+          source: "abuseipdb" as const,
           malicious: false,
           score: 0,
-          detail: '',
-          error: 'Network error',
+          detail: "",
+          error: "Network error",
         }),
       );
     }
@@ -755,6 +815,172 @@ export default function IOCExtractor({
     a.click();
     URL.revokeObjectURL(url);
   }, [filteredIOCs]);
+
+  const refreshThreatRepo = useCallback(() => {
+    setThreatActors(getThreatActors());
+  }, []);
+
+  const handleCreateThreatActor = useCallback(() => {
+    const result = createThreatActor({
+      name: newThreatActorName,
+      aliases: newThreatActorAliases,
+      description: newThreatActorDescription,
+    });
+    if (!result.ok) {
+      setThreatRepoError(result.error);
+      return;
+    }
+    setThreatRepoError(null);
+    setNewThreatActorName("");
+    setNewThreatActorAliases("");
+    setNewThreatActorDescription("");
+    setSelectedThreatActorId(result.actor.id);
+    refreshThreatRepo();
+  }, [
+    newThreatActorAliases,
+    newThreatActorDescription,
+    newThreatActorName,
+    refreshThreatRepo,
+  ]);
+
+  const handleAddThreatActorIOC = useCallback(() => {
+    if (!selectedThreatActorId) {
+      setThreatRepoError("Select a threat actor first.");
+      return;
+    }
+
+    const result = addThreatActorIOC(selectedThreatActorId, {
+      type: newActorIOCType,
+      value: newActorIOCValue,
+      note: newActorIOCNote,
+    });
+    if (!result.ok) {
+      setThreatRepoError(result.error);
+      return;
+    }
+
+    setThreatRepoError(null);
+    setNewActorIOCValue("");
+    setNewActorIOCNote("");
+    refreshThreatRepo();
+  }, [
+    newActorIOCNote,
+    newActorIOCType,
+    newActorIOCValue,
+    refreshThreatRepo,
+    selectedThreatActorId,
+  ]);
+
+  const selectedThreatActor = useMemo(
+    () =>
+      threatActors.find((actor) => actor.id === selectedThreatActorId) || null,
+    [threatActors, selectedThreatActorId],
+  );
+
+  const handleImportThreatIntelFeed = useCallback(
+    async (file: File) => {
+      setThreatRepoError(null);
+      const text = await file.text();
+      const importItems: Array<{
+        type: IOCType;
+        value: string;
+        note?: string;
+      }> = [];
+
+      try {
+        if (file.name.toLowerCase().endsWith(".json")) {
+          const parsed = JSON.parse(text) as unknown;
+          const list = Array.isArray(parsed)
+            ? parsed
+            : parsed &&
+                typeof parsed === "object" &&
+                Array.isArray((parsed as any).iocs)
+              ? (parsed as any).iocs
+              : [];
+          for (const item of list) {
+            if (!item || typeof item !== "object") continue;
+            const type = String(
+              (item as any).type || "",
+            ).toLowerCase() as IOCType;
+            const value = String((item as any).value || "").trim();
+            const note = String((item as any).note || "").trim();
+            if (
+              [
+                "ip",
+                "domain",
+                "hash",
+                "filepath",
+                "url",
+                "email",
+                "registry",
+                "base64",
+              ].includes(type) &&
+              value
+            ) {
+              importItems.push({ type, value, note });
+            }
+          }
+        } else {
+          const rows = text.split(/\r?\n/).filter(Boolean);
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i].split(/,|\t/).map((part) => part.trim());
+            if (i === 0 && row.some((col) => /type|value/i.test(col))) continue;
+            const [typeRaw, valueRaw, noteRaw] = row;
+            const type = String(typeRaw || "").toLowerCase() as IOCType;
+            const value = String(valueRaw || "").trim();
+            if (
+              [
+                "ip",
+                "domain",
+                "hash",
+                "filepath",
+                "url",
+                "email",
+                "registry",
+                "base64",
+              ].includes(type) &&
+              value
+            ) {
+              importItems.push({ type, value, note: noteRaw || "" });
+            }
+          }
+        }
+      } catch {
+        setThreatRepoError(
+          "Could not parse feed. Use JSON array or CSV/TSV with type,value,note.",
+        );
+        return;
+      }
+
+      if (importItems.length === 0) {
+        setThreatRepoError("No valid IOCs found in feed.");
+        return;
+      }
+
+      const actorResult = createThreatActor({
+        name: `${feedName} (${file.name})`,
+      });
+      if (!actorResult.ok) {
+        setThreatRepoError(actorResult.error);
+        return;
+      }
+
+      let added = 0;
+      for (const item of importItems) {
+        const result = addThreatActorIOC(actorResult.actor.id, item);
+        if (result.ok) added += 1;
+      }
+
+      refreshThreatRepo();
+      setSelectedThreatActorId(actorResult.actor.id);
+      if (added === 0) {
+        setThreatRepoError(
+          "Feed imported but all IOCs were duplicates/invalid.",
+        );
+      }
+    },
+    [feedName, refreshThreatRepo],
+  );
 
   return (
     <div className="ioc-extractor">
@@ -891,6 +1117,205 @@ export default function IOCExtractor({
             {hasVtKey ? "✓ ⚙" : "⚙"}
           </button>
         </div>
+      </div>
+
+      <div className="threat-actor-repo">
+        <div className="threat-actor-repo-header">
+          <h3>Threat Actor IOC Repository</h3>
+          <span>
+            Persisted locally for reuse across Windows and Linux investigations
+          </span>
+        </div>
+
+        <div className="threat-actor-repo-grid">
+          <div className="threat-actor-card">
+            <h4>Import Threat Intel Feed</h4>
+            <input
+              className="threat-input"
+              placeholder="Feed label (e.g., MISP Daily)"
+              value={feedName}
+              onChange={(e) => setFeedName(e.target.value)}
+            />
+            <input
+              className="threat-input"
+              type="file"
+              accept=".json,.csv,.tsv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  handleImportThreatIntelFeed(file);
+                }
+                e.currentTarget.value = "";
+              }}
+            />
+            <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: 0 }}>
+              Accepts JSON array or CSV/TSV with columns: type,value,note
+            </p>
+          </div>
+
+          <div className="threat-actor-card">
+            <h4>Create Threat Actor</h4>
+            <input
+              className="threat-input"
+              placeholder="Actor name (e.g., APT29)"
+              value={newThreatActorName}
+              onChange={(e) => setNewThreatActorName(e.target.value)}
+            />
+            <input
+              className="threat-input"
+              placeholder="Aliases (comma-separated)"
+              value={newThreatActorAliases}
+              onChange={(e) => setNewThreatActorAliases(e.target.value)}
+            />
+            <input
+              className="threat-input"
+              placeholder="Description"
+              value={newThreatActorDescription}
+              onChange={(e) => setNewThreatActorDescription(e.target.value)}
+            />
+            <button className="threat-btn" onClick={handleCreateThreatActor}>
+              Create Actor
+            </button>
+          </div>
+
+          <div className="threat-actor-card">
+            <h4>Add IOC To Actor</h4>
+            <select
+              className="threat-input"
+              value={selectedThreatActorId}
+              onChange={(e) => setSelectedThreatActorId(e.target.value)}
+            >
+              <option value="">Select threat actor</option>
+              {threatActors.map((actor) => (
+                <option key={actor.id} value={actor.id}>
+                  {actor.name}
+                </option>
+              ))}
+            </select>
+            <div className="threat-inline">
+              <select
+                className="threat-input"
+                value={newActorIOCType}
+                onChange={(e) => setNewActorIOCType(e.target.value as IOCType)}
+              >
+                {(
+                  [
+                    "ip",
+                    "domain",
+                    "hash",
+                    "filepath",
+                    "url",
+                    "email",
+                    "registry",
+                    "base64",
+                  ] as IOCType[]
+                ).map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="threat-input"
+                placeholder="IOC value"
+                value={newActorIOCValue}
+                onChange={(e) => setNewActorIOCValue(e.target.value)}
+              />
+            </div>
+            <input
+              className="threat-input"
+              placeholder="IOC note (optional)"
+              value={newActorIOCNote}
+              onChange={(e) => setNewActorIOCNote(e.target.value)}
+            />
+            <button className="threat-btn" onClick={handleAddThreatActorIOC}>
+              Add IOC
+            </button>
+            {threatRepoError && (
+              <div className="threat-error">{threatRepoError}</div>
+            )}
+          </div>
+        </div>
+
+        {threatActors.length > 0 && (
+          <div className="threat-actor-list">
+            {threatActors.map((actor) => {
+              const summary = actorMatchSummaries.find(
+                (item) => item.actorId === actor.id,
+              );
+              const isSelected = selectedThreatActorId === actor.id;
+              return (
+                <div
+                  key={actor.id}
+                  className={`threat-actor-item ${isSelected ? "selected" : ""}`}
+                >
+                  <div className="threat-actor-main">
+                    <button
+                      className="threat-link"
+                      onClick={() =>
+                        setSelectedThreatActorId(isSelected ? "" : actor.id)
+                      }
+                    >
+                      {actor.name}
+                    </button>
+                    <span>
+                      {summary?.matched || 0}/
+                      {summary?.totalIocs || actor.iocs.length} IOCs matched in
+                      current environment
+                    </span>
+                    <span>{summary?.totalHits || 0} total IOC hits</span>
+                  </div>
+                  <button
+                    className="threat-delete"
+                    onClick={() => {
+                      deleteThreatActor(actor.id);
+                      if (selectedThreatActorId === actor.id) {
+                        setSelectedThreatActorId("");
+                      }
+                      refreshThreatRepo();
+                    }}
+                  >
+                    Delete Actor
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {selectedThreatActor && selectedThreatActor.iocs.length > 0 && (
+          <div className="threat-actor-iocs">
+            <h4>{selectedThreatActor.name} IOC Set</h4>
+            {selectedThreatActor.iocs.map((ioc) => {
+              const key = `${ioc.type}:${ioc.value.toLowerCase()}`;
+              const match = extractedIOCs.find(
+                (candidate) =>
+                  `${candidate.type}:${candidate.value.toLowerCase()}` === key,
+              );
+              return (
+                <div key={ioc.id} className="threat-ioc-row">
+                  <span className="threat-ioc-type">{ioc.type}</span>
+                  <span className="threat-ioc-value">{ioc.value}</span>
+                  <span className={match ? "threat-hit" : "threat-miss"}>
+                    {match ? `${match.count} hits` : "no hits"}
+                  </span>
+                  {ioc.note && (
+                    <span className="threat-ioc-note">{ioc.note}</span>
+                  )}
+                  <button
+                    className="threat-delete"
+                    onClick={() => {
+                      deleteThreatActorIOC(selectedThreatActor.id, ioc.id);
+                      refreshThreatRepo();
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* VirusTotal API Key Configuration */}
@@ -1080,6 +1505,16 @@ export default function IOCExtractor({
                           >
                             ×{ioc.count}
                           </span>
+                          {knownIOCSet.has(
+                            `${ioc.type}:${ioc.value.toLowerCase()}`,
+                          ) && (
+                            <span
+                              className="vt-result detected"
+                              title="Matched imported threat intelligence"
+                            >
+                              🎯 Intel Match
+                            </span>
+                          )}
 
                           {/* VirusTotal result indicator */}
                           {isVtSupported && vtResult && (

@@ -10,6 +10,7 @@ import {
   BOOKMARK_COLORS,
   addBookmark,
 } from "../lib/eventBookmarks";
+import { EventCompare } from "./EventCompare";
 
 interface BookmarkPanelProps {
   entries: LogEntry[];
@@ -29,6 +30,9 @@ export default function BookmarkPanel({
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editNote, setEditNote] = useState("");
   const [bookmarkVersion, setBookmarkVersion] = useState(0);
+  const [compareA, setCompareA] = useState<LogEntry | null>(null);
+  const [compareB, setCompareB] = useState<LogEntry | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
 
   // Re-read bookmarks when version bumps (after add/remove/edit)
   const bookmarks = useMemo(() => getBookmarks(), [bookmarkVersion]);
@@ -109,6 +113,100 @@ export default function BookmarkPanel({
     } catch {
       alert("Could not copy to clipboard. Please grant clipboard permission.");
     }
+  };
+
+  const handleExportBookmarksCSV = () => {
+    if (filtered.length === 0) {
+      alert("No bookmarks to export.");
+      return;
+    }
+    const rows = ["tag,event_id,timestamp,source_file,note"];
+    for (const bk of filtered) {
+      const entry = findEntry(bk);
+      const quote = (value: string) =>
+        `"${String(value || "").replace(/"/g, '""')}"`;
+      rows.push(
+        [
+          bk.tag,
+          bk.eventId,
+          bk.timestamp,
+          entry?.sourceFile || "",
+          bk.note || "",
+        ]
+          .map(quote)
+          .join(","),
+      );
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bookmarks.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportBookmarksSTIX = () => {
+    if (filtered.length === 0) {
+      alert("No bookmarks to export.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const objects = filtered.map((bk) => {
+      const entry = findEntry(bk);
+      return {
+        type: "x-oca-event",
+        spec_version: "2.1",
+        id: `x-oca-event--${crypto.randomUUID()}`,
+        created: now,
+        modified: now,
+        event_id: bk.eventId,
+        timestamp: bk.timestamp,
+        labels: ["alienx-bookmark", `bookmark:${bk.tag}`],
+        note: bk.note || "",
+        source_file: entry?.sourceFile || "",
+        raw: entry?.rawLine || "",
+      };
+    });
+    const json = JSON.stringify(
+      {
+        type: "bundle",
+        id: `bundle--${crypto.randomUUID()}`,
+        objects,
+      },
+      null,
+      2,
+    );
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bookmarks.stix.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleCompare = (entry: LogEntry | null) => {
+    if (!entry) return;
+    if (compareA === entry) {
+      setCompareA(null);
+      return;
+    }
+    if (compareB === entry) {
+      setCompareB(null);
+      return;
+    }
+    if (!compareA) {
+      setCompareA(entry);
+      return;
+    }
+    if (!compareB) {
+      setCompareB(entry);
+      setShowCompare(true);
+      return;
+    }
+    setCompareB(entry);
+    setShowCompare(true);
   };
 
   const formatTimestamp = (ts: string) => {
@@ -230,6 +328,36 @@ export default function BookmarkPanel({
             }}
           >
             Copy All
+          </button>
+          <button
+            onClick={handleExportBookmarksCSV}
+            disabled={filtered.length === 0}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 4,
+              background: "rgba(45,212,191,0.15)",
+              color: "#2dd4bf",
+              border: "1px solid rgba(45,212,191,0.3)",
+              cursor: filtered.length ? "pointer" : "default",
+              fontSize: "0.8rem",
+            }}
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={handleExportBookmarksSTIX}
+            disabled={filtered.length === 0}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 4,
+              background: "rgba(167,139,250,0.15)",
+              color: "#a78bfa",
+              border: "1px solid rgba(167,139,250,0.3)",
+              cursor: filtered.length ? "pointer" : "default",
+              fontSize: "0.8rem",
+            }}
+          >
+            Export STIX
           </button>
           <button
             onClick={handleClearAll}
@@ -409,6 +537,27 @@ export default function BookmarkPanel({
                         View Event
                       </button>
                     )}
+                    {entry && (
+                      <button
+                        onClick={() => toggleCompare(entry)}
+                        style={{
+                          padding: "3px 10px",
+                          borderRadius: 4,
+                          background:
+                            compareA === entry || compareB === entry
+                              ? "rgba(168,85,247,0.18)"
+                              : "rgba(168,85,247,0.08)",
+                          color: "#a78bfa",
+                          border: "1px solid rgba(168,85,247,0.35)",
+                          cursor: "pointer",
+                          fontSize: "0.75rem",
+                        }}
+                      >
+                        {compareA === entry || compareB === entry
+                          ? "Selected"
+                          : "Compare"}
+                      </button>
+                    )}
                     {!isEditing && (
                       <button
                         onClick={() => {
@@ -450,6 +599,13 @@ export default function BookmarkPanel({
           )}
         </div>
       </div>
+
+      <EventCompare
+        eventA={compareA}
+        eventB={compareB}
+        isOpen={showCompare}
+        onClose={() => setShowCompare(false)}
+      />
     </div>
   );
 }

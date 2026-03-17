@@ -21,6 +21,7 @@ interface DashboardProps {
     matches: YaraRuleMatch[],
     stats: YaraScanStats | null,
   ) => void;
+  playbookFilterId?: string | null;
 }
 
 export default function Dashboard({
@@ -34,6 +35,7 @@ export default function Dashboard({
   cachedYaraMatches,
   cachedYaraStats,
   onYaraMatchesUpdate,
+  playbookFilterId,
 }: DashboardProps) {
   // Track if analysis is complete - disable back button until done
   const [isAnalysisComplete, setIsAnalysisComplete] = useState(
@@ -255,6 +257,7 @@ export default function Dashboard({
               onMatchesUpdate={handleAnalysisComplete}
               cachedMatches={cachedMatches}
               sourceFiles={data.sourceFiles}
+              playbookFilterId={playbookFilterId}
             />
           </div>
           <div className="sigma-section">

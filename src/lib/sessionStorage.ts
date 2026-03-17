@@ -35,6 +35,43 @@ export interface SessionMetadata {
 const SESSIONS_INDEX_KEY = "alienx_sessions_index";
 const SESSION_PREFIX = "alienx_session_";
 const MAX_SESSIONS = 50;
+const AUTOSAVE_KEY = "alienx_autosave_session_v1";
+
+function isSessionMetadataArray(value: unknown): value is SessionMetadata[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        typeof (item as SessionMetadata).id === "string" &&
+        typeof (item as SessionMetadata).name === "string" &&
+        typeof (item as SessionMetadata).createdAt === "string" &&
+        typeof (item as SessionMetadata).filename === "string" &&
+        (typeof (item as SessionMetadata).platform === "string" ||
+          (item as SessionMetadata).platform === null) &&
+        typeof (item as SessionMetadata).eventCount === "number" &&
+        typeof (item as SessionMetadata).matchCount === "number",
+    )
+  );
+}
+
+function isSavedSession(value: unknown): value is SavedSession {
+  if (!value || typeof value !== "object") return false;
+  const session = value as SavedSession;
+  return (
+    typeof session.id === "string" &&
+    typeof session.name === "string" &&
+    typeof session.createdAt === "string" &&
+    typeof session.filename === "string" &&
+    (typeof session.platform === "string" || session.platform === null) &&
+    typeof session.eventCount === "number" &&
+    typeof session.matchCount === "number" &&
+    !!session.data &&
+    Array.isArray(session.data.entries) &&
+    Array.isArray(session.matches)
+  );
+}
 
 // Generate unique session ID
 function generateId(): string {
@@ -46,7 +83,8 @@ export function getSessionsList(): SessionMetadata[] {
   try {
     const index = localStorage.getItem(SESSIONS_INDEX_KEY);
     if (!index) return [];
-    return JSON.parse(index) as SessionMetadata[];
+    const parsed: unknown = JSON.parse(index);
+    return isSessionMetadataArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -160,7 +198,11 @@ export function loadSession(id: string): {
         return new Date(value.value);
       }
       return value;
-    }) as SavedSession;
+    }) as unknown;
+
+    if (!isSavedSession(session)) {
+      return null;
+    }
 
     // Ensure timestamps are Date objects
     const entries: LogEntry[] = session.data.entries.map((entry) => ({
@@ -219,7 +261,8 @@ export function renameSession(id: string, newName: string): boolean {
     // Also update the full session data
     const serialized = localStorage.getItem(SESSION_PREFIX + id);
     if (serialized) {
-      const fullSession = JSON.parse(serialized) as SavedSession;
+      const fullSession = JSON.parse(serialized) as unknown;
+      if (!isSavedSession(fullSession)) return false;
       fullSession.name = newName;
       localStorage.setItem(SESSION_PREFIX + id, JSON.stringify(fullSession));
     }
@@ -265,4 +308,93 @@ export function clearAllSessions(): void {
     localStorage.removeItem(SESSION_PREFIX + session.id);
   }
   localStorage.removeItem(SESSIONS_INDEX_KEY);
+}
+
+export function saveAutoSession(
+  filename: string,
+  platform: string | null,
+  data: ParsedData,
+  matches: Map<string, SigmaRuleMatch[]>,
+): void {
+  try {
+    const payload = {
+      savedAt: new Date().toISOString(),
+      filename,
+      platform,
+      data,
+      matches: Array.from(matches.entries()),
+    };
+
+    localStorage.setItem(
+      AUTOSAVE_KEY,
+      JSON.stringify(payload, (_key, value) => {
+        if (value instanceof Date) {
+          return { __date: true, value: value.toISOString() };
+        }
+        return value;
+      }),
+    );
+  } catch {
+    // Best effort; skip hard failure for autosave.
+  }
+}
+
+export function loadAutoSession(): {
+  savedAt: string;
+  filename: string;
+  platform: string | null;
+  data: ParsedData;
+  matches: Map<string, SigmaRuleMatch[]>;
+} | null {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw, (_key, value) => {
+      if (value && typeof value === "object" && value.__date) {
+        return new Date(value.value);
+      }
+      return value;
+    }) as unknown;
+
+    if (!parsed || typeof parsed !== "object") return null;
+    const payload = parsed as {
+      savedAt?: string;
+      filename?: string;
+      platform?: string | null;
+      data?: ParsedData;
+      matches?: [string, SigmaRuleMatch[]][];
+    };
+    if (
+      typeof payload.savedAt !== "string" ||
+      typeof payload.filename !== "string" ||
+      !payload.data ||
+      !Array.isArray(payload.data.entries) ||
+      !Array.isArray(payload.matches)
+    ) {
+      return null;
+    }
+
+    const entries: LogEntry[] = payload.data.entries.map((entry) => ({
+      ...entry,
+      timestamp: new Date(entry.timestamp),
+    }));
+
+    return {
+      savedAt: payload.savedAt,
+      filename: payload.filename,
+      platform: payload.platform ?? null,
+      data: {
+        ...payload.data,
+        entries,
+      },
+      matches: new Map<string, SigmaRuleMatch[]>(payload.matches),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearAutoSession(): void {
+  localStorage.removeItem(AUTOSAVE_KEY);
 }

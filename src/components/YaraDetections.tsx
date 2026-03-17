@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LogEntry, LogPlatform } from "../types";
-import { scanEventsWithYara, YaraRuleMatch, YaraScanStats } from "../lib/yara";
+import {
+  BundledYaraRule,
+  scanEventsWithYara,
+  YaraRuleMatch,
+  YaraScanStats,
+} from "../lib/yara";
+import {
+  customRuleToDraft,
+  createCustomYaraRule,
+  CustomYaraRuleDraft,
+  deleteCustomYaraRule,
+  getCustomYaraRules,
+  getStoredYaraStrictness,
+  setStoredYaraStrictness,
+  updateCustomYaraRule,
+  YaraStrictness,
+} from "../lib/customYaraRules";
 import { EventDetailsModal } from "./EventDetailsModal";
 import FileFilter from "./FileFilter";
 import FileBreakdownStats from "./FileBreakdownStats";
@@ -47,6 +63,26 @@ export default function YaraDetections({
   const onMatchesUpdateRef = useRef(onMatchesUpdate);
   onMatchesUpdateRef.current = onMatchesUpdate;
 
+  const [strictness, setStrictness] = useState<YaraStrictness>(() =>
+    getStoredYaraStrictness(),
+  );
+  const [customRules, setCustomRules] = useState<BundledYaraRule[]>(() =>
+    getCustomYaraRules(),
+  );
+  const [customRuleError, setCustomRuleError] = useState<string | null>(null);
+  const [showCustomRuleBuilder, setShowCustomRuleBuilder] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [draftRule, setDraftRule] = useState<CustomYaraRuleDraft>({
+    title: "",
+    description: "",
+    author: "",
+    tags: "",
+    literals: "",
+    exclusions: "",
+    minMatches: 2,
+    platform,
+  });
+
   // Card expand/collapse
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
 
@@ -70,6 +106,63 @@ export default function YaraDetections({
   const [selectedEvent, setSelectedEvent] = useState<LogEntry | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("YARA Matched Event");
+
+  const platformCustomRules = useMemo(
+    () =>
+      customRules.filter(
+        (rule) => rule.platform === "all" || rule.platform === platform,
+      ),
+    [customRules, platform],
+  );
+
+  const handleStrictnessChange = (value: YaraStrictness) => {
+    setStrictness(value);
+    setStoredYaraStrictness(value);
+  };
+
+  const resetDraftRule = () => {
+    setEditingRuleId(null);
+    setCustomRuleError(null);
+    setDraftRule({
+      title: "",
+      description: "",
+      author: "",
+      tags: "",
+      literals: "",
+      exclusions: "",
+      minMatches: 2,
+      platform,
+    });
+  };
+
+  const handleSaveCustomRule = () => {
+    const result = editingRuleId
+      ? updateCustomYaraRule(editingRuleId, draftRule)
+      : createCustomYaraRule(draftRule);
+    if (!result.ok) {
+      setCustomRuleError(result.error);
+      return;
+    }
+    setCustomRuleError(null);
+    const updated = getCustomYaraRules();
+    setCustomRules(updated);
+    resetDraftRule();
+  };
+
+  const handleEditCustomRule = (rule: BundledYaraRule) => {
+    setEditingRuleId(rule.id);
+    setCustomRuleError(null);
+    setDraftRule(customRuleToDraft(rule));
+    setShowCustomRuleBuilder(true);
+  };
+
+  const handleDeleteCustomRule = (ruleId: string) => {
+    if (editingRuleId === ruleId) {
+      resetDraftRule();
+    }
+    deleteCustomYaraRule(ruleId);
+    setCustomRules(getCustomYaraRules());
+  };
 
   // Auto-clear copy tooltip
   useEffect(() => {
@@ -111,8 +204,13 @@ export default function YaraDetections({
   }, []);
 
   useEffect(() => {
-    // Skip scan if results are already cached
-    if (cachedMatches !== undefined) {
+    const canUseCachedResults =
+      cachedMatches !== undefined &&
+      strictness === "balanced" &&
+      platformCustomRules.length === 0;
+
+    // Skip scan only for baseline mode with no custom rules
+    if (canUseCachedResults) {
       setMatches(cachedMatches);
       setScanStats(cachedStats ?? null);
       setIsLoading(false);
@@ -134,14 +232,23 @@ export default function YaraDetections({
     setScanStats(null);
     setProgress({ processed: 0, total: 0, matchesFound: 0 });
 
-    scanEventsWithYara(events, platform, (processed, total, matchesFound) => {
-      if (cancelled) return;
-      const now = performance.now();
-      if (now - lastProgressUpdateRef.current < 120 && processed < total)
-        return;
-      lastProgressUpdateRef.current = now;
-      setProgress({ processed, total, matchesFound });
-    })
+    scanEventsWithYara(
+      events,
+      platform,
+      (processed, total, matchesFound) => {
+        if (cancelled) return;
+        const now = performance.now();
+        if (now - lastProgressUpdateRef.current < 120 && processed < total)
+          return;
+        lastProgressUpdateRef.current = now;
+        setProgress({ processed, total, matchesFound });
+      },
+      50,
+      {
+        strictness,
+        customRules,
+      },
+    )
       .then((result) => {
         if (cancelled) return;
         setMatches(result.matches);
@@ -161,7 +268,18 @@ export default function YaraDetections({
     return () => {
       cancelled = true;
     };
-  }, [events, platform, cachedMatches, cachedStats]);
+  }, [
+    events,
+    platform,
+    cachedMatches,
+    cachedStats,
+    strictness,
+    customRules,
+    // Use a content-aware key instead of .length so that replacing one rule
+    // with another of the same array length still triggers a re-scan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    platformCustomRules.map((r) => r.id).join(","),
+  ]);
 
   // Sort by total matched events descending
   const sortedMatches = useMemo(() => {
@@ -262,6 +380,282 @@ export default function YaraDetections({
         <p className="sigma-subtitle">
           Community YARA rules scanned across uploaded {platform} evidence
         </p>
+      </div>
+
+      <div
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--border-secondary)",
+          borderRadius: 12,
+          padding: "1rem",
+          marginBottom: "1rem",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: "0.75rem",
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <strong>False Positive Tuning</strong>
+          <select
+            value={strictness}
+            onChange={(e) =>
+              handleStrictnessChange(e.target.value as YaraStrictness)
+            }
+            style={{
+              background: "var(--bg-hover)",
+              border: "1px solid var(--border-primary)",
+              color: "var(--text-primary)",
+              borderRadius: 8,
+              padding: "0.4rem 0.6rem",
+            }}
+          >
+            <option value="strict">Strict (least false positives)</option>
+            <option value="balanced">Balanced (recommended)</option>
+            <option value="permissive">Permissive (max detection)</option>
+          </select>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+            Strictness is applied to both bundled and custom rules.
+          </span>
+        </div>
+
+        <button
+          className="action-button"
+          onClick={() => {
+            setShowCustomRuleBuilder((prev) => !prev);
+            if (editingRuleId) {
+              resetDraftRule();
+            }
+          }}
+          style={{ marginBottom: showCustomRuleBuilder ? "0.75rem" : 0 }}
+        >
+          {showCustomRuleBuilder ? "Hide" : "Add"} Custom YARA Rule
+        </button>
+
+        {showCustomRuleBuilder && (
+          <div style={{ display: "grid", gap: "0.6rem" }}>
+            {editingRuleId && (
+              <div style={{ color: "#fbbf24", fontSize: "0.85rem" }}>
+                Editing existing custom rule.
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+              <input
+                value={draftRule.title}
+                onChange={(e) =>
+                  setDraftRule((prev) => ({ ...prev, title: e.target.value }))
+                }
+                placeholder="Rule title"
+                style={{
+                  flex: "1 1 220px",
+                  background: "var(--bg-hover)",
+                  border: "1px solid var(--border-primary)",
+                  color: "var(--text-primary)",
+                  borderRadius: 8,
+                  padding: "0.5rem",
+                }}
+              />
+              <input
+                value={draftRule.author}
+                onChange={(e) =>
+                  setDraftRule((prev) => ({ ...prev, author: e.target.value }))
+                }
+                placeholder="Author"
+                style={{
+                  flex: "1 1 180px",
+                  background: "var(--bg-hover)",
+                  border: "1px solid var(--border-primary)",
+                  color: "var(--text-primary)",
+                  borderRadius: 8,
+                  padding: "0.5rem",
+                }}
+              />
+              <select
+                value={draftRule.platform}
+                onChange={(e) =>
+                  setDraftRule((prev) => ({
+                    ...prev,
+                    platform: e.target.value as LogPlatform | "all",
+                  }))
+                }
+                style={{
+                  background: "var(--bg-hover)",
+                  border: "1px solid var(--border-primary)",
+                  color: "var(--text-primary)",
+                  borderRadius: 8,
+                  padding: "0.5rem",
+                }}
+              >
+                <option value="windows">Windows</option>
+                <option value="linux">Linux</option>
+                <option value="all">Windows + Linux</option>
+              </select>
+              <input
+                type="number"
+                min={1}
+                value={draftRule.minMatches}
+                onChange={(e) =>
+                  setDraftRule((prev) => ({
+                    ...prev,
+                    minMatches: Number(e.target.value) || 1,
+                  }))
+                }
+                title="Minimum literal matches"
+                style={{
+                  width: 90,
+                  background: "var(--bg-hover)",
+                  border: "1px solid var(--border-primary)",
+                  color: "var(--text-primary)",
+                  borderRadius: 8,
+                  padding: "0.5rem",
+                }}
+              />
+            </div>
+
+            <input
+              value={draftRule.tags}
+              onChange={(e) =>
+                setDraftRule((prev) => ({ ...prev, tags: e.target.value }))
+              }
+              placeholder="Tags (comma-separated)"
+              style={{
+                background: "var(--bg-hover)",
+                border: "1px solid var(--border-primary)",
+                color: "var(--text-primary)",
+                borderRadius: 8,
+                padding: "0.5rem",
+              }}
+            />
+
+            <input
+              value={draftRule.description}
+              onChange={(e) =>
+                setDraftRule((prev) => ({
+                  ...prev,
+                  description: e.target.value,
+                }))
+              }
+              placeholder="Description"
+              style={{
+                background: "var(--bg-hover)",
+                border: "1px solid var(--border-primary)",
+                color: "var(--text-primary)",
+                borderRadius: 8,
+                padding: "0.5rem",
+              }}
+            />
+
+            <textarea
+              value={draftRule.literals}
+              onChange={(e) =>
+                setDraftRule((prev) => ({ ...prev, literals: e.target.value }))
+              }
+              placeholder="Required literals (one per line)"
+              rows={5}
+              style={{
+                background: "var(--bg-hover)",
+                border: "1px solid var(--border-primary)",
+                color: "var(--text-primary)",
+                borderRadius: 8,
+                padding: "0.5rem",
+              }}
+            />
+
+            <textarea
+              value={draftRule.exclusions}
+              onChange={(e) =>
+                setDraftRule((prev) => ({
+                  ...prev,
+                  exclusions: e.target.value,
+                }))
+              }
+              placeholder="Exclusion literals for noisy benign text (one per line, optional)"
+              rows={3}
+              style={{
+                background: "var(--bg-hover)",
+                border: "1px solid var(--border-primary)",
+                color: "var(--text-primary)",
+                borderRadius: 8,
+                padding: "0.5rem",
+              }}
+            />
+
+            {customRuleError && (
+              <div style={{ color: "#f87171", fontSize: "0.85rem" }}>
+                {customRuleError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                Build rule directly in-app for Windows, Linux, or both.
+              </span>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                {editingRuleId && (
+                  <button className="load-more-btn" onClick={resetDraftRule}>
+                    Cancel Edit
+                  </button>
+                )}
+                <button
+                  className="action-button"
+                  onClick={handleSaveCustomRule}
+                >
+                  {editingRuleId ? "Update Rule" : "Save Custom Rule"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {platformCustomRules.length > 0 && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <strong style={{ fontSize: "0.9rem" }}>
+              Custom Rules for {platform}
+            </strong>
+            <div
+              style={{ display: "grid", gap: "0.4rem", marginTop: "0.5rem" }}
+            >
+              {platformCustomRules.slice(0, 8).map((rule) => (
+                <div
+                  key={rule.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    background: "var(--bg-hover)",
+                    border: "1px solid var(--border-secondary)",
+                    borderRadius: 8,
+                    padding: "0.45rem 0.6rem",
+                  }}
+                >
+                  <span style={{ fontSize: "0.85rem" }}>
+                    {rule.title} ({rule.literals.length} literals, min{" "}
+                    {rule.minMatches})
+                  </span>
+                  <div style={{ display: "flex", gap: "0.4rem" }}>
+                    <button
+                      className="load-more-btn"
+                      onClick={() => handleEditCustomRule(rule)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="load-more-btn"
+                      onClick={() => handleDeleteCustomRule(rule.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="sigma-summary">

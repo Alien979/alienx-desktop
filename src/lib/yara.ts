@@ -12,8 +12,16 @@ export interface BundledYaraRule {
   platform: "linux" | "windows" | "all";
   tags: string[];
   literals: string[];
+  exclusions?: string[];
   minMatches: number;
   anchor: string;
+}
+
+export type YaraStrictness = "strict" | "balanced" | "permissive";
+
+export interface YaraScanOptions {
+  strictness?: YaraStrictness;
+  customRules?: BundledYaraRule[];
 }
 
 export interface YaraMatchedFile {
@@ -130,7 +138,10 @@ export async function loadBundledYaraRules(
     })
     .catch((error) => {
       console.error("[YARA] Failed to load bundled rules:", error);
-      return [];
+      // Remove the failed entry so re-tries on next call rather than forever
+      // returning an empty rule set with no feedback.
+      bundleCache.delete(platform);
+      return [] as BundledYaraRule[];
     });
 
   bundleCache.set(platform, promise);
@@ -142,9 +153,15 @@ export async function scanEventsWithYara(
   platform: LogPlatform,
   onProgress?: (processed: number, total: number, matchesFound: number) => void,
   chunkSize: number = 50,
+  options: YaraScanOptions = {},
 ): Promise<{ matches: YaraRuleMatch[]; stats: YaraScanStats }> {
   const startedAt = performance.now();
-  const rules = await loadBundledYaraRules(platform);
+  const strictness = options.strictness || "balanced";
+  const bundledRules = await loadBundledYaraRules(platform);
+  const customRules = (options.customRules || []).filter(
+    (rule) => rule.platform === platform || rule.platform === "all",
+  );
+  const rules = [...customRules, ...bundledRules];
   const files = groupEventsBySourceFile(events);
   const totalComparisons = rules.length * files.length;
   const matches = new Map<string, YaraRuleMatch>();
@@ -173,6 +190,13 @@ export async function scanEventsWithYara(
           continue;
         }
 
+        if (
+          rule.exclusions &&
+          rule.exclusions.some((literal) => file.corpus.includes(literal))
+        ) {
+          continue;
+        }
+
         const matchedLiterals = rule.literals.filter((literal) =>
           file.corpus.includes(literal),
         );
@@ -182,6 +206,13 @@ export async function scanEventsWithYara(
           for (const entry of file.entries) {
             const eventCorpus = buildEventCorpus(entry);
             if (!eventCorpus) continue;
+
+            if (
+              rule.exclusions &&
+              rule.exclusions.some((literal) => eventCorpus.includes(literal))
+            ) {
+              continue;
+            }
 
             const eventMatchedLiterals = matchedLiterals.filter((literal) =>
               eventCorpus.includes(literal),
@@ -208,8 +239,27 @@ export async function scanEventsWithYara(
       }
 
       if (matchedFiles.length > 0) {
-        matches.set(rule.id, { rule, matchedFiles });
-        matchesFound += matchedFiles.length;
+        const eventMatches = matchedFiles.reduce(
+          (sum, file) => sum + file.matchedEvents.length,
+          0,
+        );
+        const distinctLiteralCount = new Set(
+          matchedFiles.flatMap((file) => file.matchedLiterals),
+        ).size;
+
+        const strictnessPasses =
+          strictness === "permissive"
+            ? true
+            : strictness === "balanced"
+              ? eventMatches >= 1 &&
+                distinctLiteralCount >= Math.min(2, rule.minMatches)
+              : eventMatches >= 2 &&
+                distinctLiteralCount >= Math.max(2, rule.minMatches);
+
+        if (strictnessPasses) {
+          matches.set(rule.id, { rule, matchedFiles });
+          matchesFound += matchedFiles.length;
+        }
       }
     }
 

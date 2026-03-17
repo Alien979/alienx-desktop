@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { isBinaryEVTX } from "../evtxBinaryParser";
 import { parseBinaryEVTXToEntries } from "../lib/evtxWasmParser";
 import { parseLogFile } from "../parser";
+import { isExcelFile, isCsvFile, parseExcelFile } from "../lib/excelParser";
 import { ParsedData } from "../types";
 import { generateSampleData } from "../lib/sampleDataGenerator";
 import SampleSelector from "./SampleSelector";
@@ -30,6 +31,12 @@ export default function FileDropZone({
   rulesLoading,
   onOpenSessions,
 }: FileDropZoneProps) {
+  const getMaxFileSizeMB = (file: File): number => {
+    if (isCsvFile(file)) return 8192; // 8 GB for streamed CSV/TSV
+    if (isExcelFile(file)) return 1024; // XLSX/XLS browser memory limit
+    return 2000; // EVTX/XML/ZIP
+  };
+
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState("");
@@ -50,17 +57,34 @@ export default function FileDropZone({
       setProcessingStatus("Checking file format...");
 
       try {
-        // Check file size and enforce limit
-        // Increased to 2GB to support larger EVTX files
         const fileSizeMB = file.size / 1024 / 1024;
-        const MAX_FILE_SIZE_MB = 2000;
+        const MAX_FILE_SIZE_MB = getMaxFileSizeMB(file);
 
         if (fileSizeMB > MAX_FILE_SIZE_MB) {
           alert(
             `File too large: ${fileSizeMB.toFixed(1)} MB\n\n` +
               `Maximum file size: ${MAX_FILE_SIZE_MB} MB\n\n` +
-              `Please use a smaller log file or filter the events before exporting.`,
+              (isExcelFile(file)
+                ? `For very large exports, save as CSV/TSV and upload that file.`
+                : `Please use a smaller log file or split the dataset before exporting.`),
           );
+          setIsProcessing(false);
+          return;
+        }
+
+        // Check for Excel / CSV SIEM exports first
+        if (isExcelFile(file) || isCsvFile(file)) {
+          setProcessingStatus(
+            `Parsing ${file.name} (${fileSizeMB.toFixed(1)} MB)...`,
+          );
+          const parsedData = await parseExcelFile(file, (processed, total) => {
+            setProcessingStatus(
+              `Parsing progress: ${Math.round((processed / Math.max(total, 1)) * 100)}%`,
+            );
+          });
+          setProcessingStatus("Loading analysis selector...");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          onFileLoaded(parsedData, file.name);
           setIsProcessing(false);
           return;
         }
@@ -395,7 +419,7 @@ export default function FileDropZone({
         try {
           // Validate file size
           const fileSizeMB = file.size / 1024 / 1024;
-          const MAX_FILE_SIZE_MB = 2000;
+          const MAX_FILE_SIZE_MB = getMaxFileSizeMB(file);
 
           if (fileSizeMB > MAX_FILE_SIZE_MB) {
             result.error = {
@@ -408,113 +432,143 @@ export default function FileDropZone({
             continue;
           }
 
-          // Check if binary EVTX
-          const isBinary = await isBinaryEVTX(file);
-
-          if (isBinary) {
-            // Binary EVTX path
+          // Check for Excel / CSV SIEM exports first
+          if (isExcelFile(file) || isCsvFile(file)) {
             setProcessingStatus(
-              `[${i + 1}/${filesToProcess.length}] Parsing binary EVTX: ${displayName}`,
+              `[${i + 1}/${filesToProcess.length}] Parsing ${displayName}...`,
             );
-
             try {
-              const entries = await parseBinaryEVTXToEntries(
+              const parsedData = await parseExcelFile(
                 file,
                 (processed, total) => {
-                  const totalDisplay = total
-                    ? total.toLocaleString()
-                    : "unknown";
-                  const percentage =
-                    total > 0
-                      ? ` (${Math.round((processed / total) * 100)}%)`
-                      : "";
                   setProcessingStatus(
-                    `[${i + 1}/${filesToProcess.length}] ${displayName}: ${processed.toLocaleString()} / ${totalDisplay} records${percentage}`,
+                    `[${i + 1}/${filesToProcess.length}] ${displayName}: ${Math.round((processed / Math.max(total, 1)) * 100)}%`,
                   );
                 },
-                file.name,
               );
-
-              const parsedData: ParsedData = {
-                entries,
-                format: "evtx",
-                platform: "windows",
-                totalLines: entries.length,
-                parsedLines: entries.length,
-                sourceFiles: [file.name],
-              };
-
-              result.status = "success";
-              result.parsedData = parsedData;
-              result.recordCount = entries.length;
-            } catch (parseError) {
-              // Categorize WASM parsing errors
-              result.error = categorizeWasmError(parseError, file.name);
-            }
-          } else {
-            // XML path
-            const CHUNK_SIZE = 10 * 1024 * 1024;
-            const fileChunks = Math.ceil(file.size / CHUNK_SIZE);
-            setTotalChunks(fileChunks);
-            setProcessingStatus(
-              `[${i + 1}/${filesToProcess.length}] Reading ${displayName}...`,
-            );
-
-            try {
-              const xmlContent = await new Promise<string>(
-                (resolve, reject) => {
-                  const chunks: string[] = [];
-                  let offset = 0;
-                  let loadedChunks = 0;
-
-                  const readNextChunk = () => {
-                    const blob = file.slice(offset, offset + CHUNK_SIZE);
-                    const reader = new FileReader();
-
-                    reader.onload = (e) => {
-                      chunks.push(e.target?.result as string);
-                      offset += CHUNK_SIZE;
-                      loadedChunks++;
-                      setChunksProcessed(loadedChunks);
-
-                      if (offset < file.size) {
-                        readNextChunk();
-                      } else {
-                        resolve(chunks.join(""));
-                      }
-                    };
-
-                    reader.onerror = () =>
-                      reject(new Error(`Error reading ${file.name}`));
-                    reader.readAsText(blob);
-                  };
-
-                  readNextChunk();
-                },
-              );
-
-              // Parse XML
-              setProcessingStatus(
-                `[${i + 1}/${filesToProcess.length}] Parsing events from ${displayName}...`,
-              );
-              const parsedData = parseLogFile(
-                xmlContent,
-                (processed, total) => {
-                  setProcessingStatus(
-                    `[${i + 1}/${filesToProcess.length}] ${displayName}: ${processed.toLocaleString()} / ${total.toLocaleString()} events`,
-                  );
-                },
-                file.name,
-              );
-
               result.status = "success";
               result.parsedData = parsedData;
               result.recordCount = parsedData.entries.length;
-            } catch (xmlError) {
-              // Categorize XML parsing errors
-              result.error = categorizeXmlError(xmlError, file.name);
+            } catch (excelError) {
+              result.error = {
+                type: ErrorType.INVALID_FORMAT,
+                message: "Failed to parse Excel/CSV file",
+                technicalDetails:
+                  excelError instanceof Error
+                    ? excelError.message
+                    : String(excelError),
+                failurePoint: "parsing",
+              };
             }
-          }
+          } else {
+            // Check if binary EVTX
+            const isBinary = await isBinaryEVTX(file);
+
+            if (isBinary) {
+              // Binary EVTX path
+              setProcessingStatus(
+                `[${i + 1}/${filesToProcess.length}] Parsing binary EVTX: ${displayName}`,
+              );
+
+              try {
+                const entries = await parseBinaryEVTXToEntries(
+                  file,
+                  (processed, total) => {
+                    const totalDisplay = total
+                      ? total.toLocaleString()
+                      : "unknown";
+                    const percentage =
+                      total > 0
+                        ? ` (${Math.round((processed / total) * 100)}%)`
+                        : "";
+                    setProcessingStatus(
+                      `[${i + 1}/${filesToProcess.length}] ${displayName}: ${processed.toLocaleString()} / ${totalDisplay} records${percentage}`,
+                    );
+                  },
+                  file.name,
+                );
+
+                const parsedData: ParsedData = {
+                  entries,
+                  format: "evtx",
+                  platform: "windows",
+                  totalLines: entries.length,
+                  parsedLines: entries.length,
+                  sourceFiles: [file.name],
+                };
+
+                result.status = "success";
+                result.parsedData = parsedData;
+                result.recordCount = entries.length;
+              } catch (parseError) {
+                // Categorize WASM parsing errors
+                result.error = categorizeWasmError(parseError, file.name);
+              }
+            } else {
+              // XML path
+              const CHUNK_SIZE = 10 * 1024 * 1024;
+              const fileChunks = Math.ceil(file.size / CHUNK_SIZE);
+              setTotalChunks(fileChunks);
+              setProcessingStatus(
+                `[${i + 1}/${filesToProcess.length}] Reading ${displayName}...`,
+              );
+
+              try {
+                const xmlContent = await new Promise<string>(
+                  (resolve, reject) => {
+                    const chunks: string[] = [];
+                    let offset = 0;
+                    let loadedChunks = 0;
+
+                    const readNextChunk = () => {
+                      const blob = file.slice(offset, offset + CHUNK_SIZE);
+                      const reader = new FileReader();
+
+                      reader.onload = (e) => {
+                        chunks.push(e.target?.result as string);
+                        offset += CHUNK_SIZE;
+                        loadedChunks++;
+                        setChunksProcessed(loadedChunks);
+
+                        if (offset < file.size) {
+                          readNextChunk();
+                        } else {
+                          resolve(chunks.join(""));
+                        }
+                      };
+
+                      reader.onerror = () =>
+                        reject(new Error(`Error reading ${file.name}`));
+                      reader.readAsText(blob);
+                    };
+
+                    readNextChunk();
+                  },
+                );
+
+                // Parse XML
+                setProcessingStatus(
+                  `[${i + 1}/${filesToProcess.length}] Parsing events from ${displayName}...`,
+                );
+                const parsedData = parseLogFile(
+                  xmlContent,
+                  (processed, total) => {
+                    setProcessingStatus(
+                      `[${i + 1}/${filesToProcess.length}] ${displayName}: ${processed.toLocaleString()} / ${total.toLocaleString()} events`,
+                    );
+                  },
+                  file.name,
+                );
+
+                result.status = "success";
+                result.parsedData = parsedData;
+                result.recordCount = parsedData.entries.length;
+              } catch (xmlError) {
+                // Categorize XML parsing errors
+                result.error = categorizeXmlError(xmlError, file.name);
+              }
+            }
+          } // end else (not Excel/CSV)
         } catch (error) {
           // Catch-all for unexpected errors
           result.error = {
@@ -770,15 +824,18 @@ export default function FileDropZone({
           </>
         ) : (
           <>
-            <h2>Drop your EVTX/XML/ZIP files or folders here</h2>
+            <h2>Drop your log files or folders here</h2>
             <p>
-              Windows Event Log files (.evtx) - binary or XML export, or ZIP
-              archives containing logs
+              Windows Event Logs (.evtx), XML exports, Excel/CSV SIEM exports
+              (.xlsx, .xls, .csv, .tsv), or ZIP archives containing logs
             </p>
             <p className="info-note">
               💡 You can select multiple files or a full folder at once
             </p>
-            <p className="info-note">💡 File size limit: 1GB per file</p>
+            <p className="info-note">
+              💡 Limits: CSV/TSV up to 8GB (streamed), EVTX/XML up to 2GB,
+              XLSX/XLS up to 1GB
+            </p>
             <p className="privacy-note">
               🔒 100% client-side processing - your data never leaves your
               computer (except when using AI analysis)
@@ -788,7 +845,7 @@ export default function FileDropZone({
               <label className="file-input-label">
                 <input
                   type="file"
-                  accept=".evtx,.xml,.zip"
+                  accept=".evtx,.xml,.xlsx,.xls,.csv,.tsv,.zip"
                   onChange={handleFileInput}
                   style={{ display: "none" }}
                   disabled={rulesLoading || isProcessing}

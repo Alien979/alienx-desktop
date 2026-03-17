@@ -1,6 +1,6 @@
 .analysis-selector {
   min-height: 100vh;
-  background: var(--bg-primary);
+  background: transparent;
   padding: 2rem;
 }
 
@@ -10,7 +10,7 @@
   align-items: center;
   margin-bottom: 2rem;
   padding-bottom: 1rem;
-  border-bottom: 2px solid var(--border-primary);
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .header-content {
@@ -32,6 +32,8 @@
   font-size: 2.5rem;
   color: var(--accent-blue);
   margin: 0;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 20px rgba(56, 189, 248, 0.16);
 }
 
 .tagline {
@@ -113,6 +115,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 1rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .file-badge {
@@ -166,7 +169,7 @@
 .analysis-card {
   background: var(--bg-card);
   border: 2px solid var(--border-primary);
-  border-radius: 16px;
+  border-radius: 14px;
   padding: 1.5rem;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -258,6 +261,16 @@
   border-color: var(--accent-yellow);
 }
 
+.analysis-card.rarity {
+  border-color: #2dd4bf;
+}
+
+.analysis-card.rarity:hover,
+.analysis-card.rarity.hovered {
+  background: rgba(45, 212, 191, 0.12);
+  border-color: #2dd4bf;
+}
+
 .analysis-card.ai {
   border-color: var(--accent-pink);
 }
@@ -266,6 +279,13 @@
 .analysis-card.ai.hovered {
   background: var(--accent-pink-bg);
   border-color: var(--accent-pink);
+}
+
+.analysis-selector mark {
+  background: rgba(250, 204, 21, 0.3);
+  color: #fde68a;
+  border-radius: 3px;
+  padding: 0 2px;
 }
 
 /* Feedback Card */

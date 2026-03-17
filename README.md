@@ -12,6 +12,7 @@
 | ------------------------- | ---------------------------------------------------------------------- |
 | Windows EVTX (binary)     | Parsed in-browser via a WebAssembly EVTX parser                        |
 | Windows EVTX (XML export) | Drop an XML-formatted event log                                        |
+| SIEM exports (Excel/CSV)  | Import `.xlsx`, `.xls`, `.csv`, and `.tsv` exports from common SIEMs   |
 | Linux log files           | Syslog, auth.log, kern.log, /var/log/\* and similar plain-text formats |
 | Multi-file drag-and-drop  | Load several files at once and analyse them together                   |
 
@@ -88,6 +89,7 @@ Automatically extracts Indicators of Compromise from all log data:
 
 - **Types detected:** IP addresses, domain names, file hashes (MD5/SHA1/SHA256), URLs, email addresses
 - **Threat intelligence:** Live AbuseIPDB lookups (bring your own API key — never sent to our servers)
+- **Threat intel feed import:** Bulk import known-bad IOC feeds (`.json`, `.csv`, `.tsv`) from MISP/OpenCTI/VT exports and auto-highlight local matches
 - **Export:** STIX 2.1 bundle for use in other tools
 
 #### Event Correlation
@@ -107,9 +109,19 @@ Chat with your log data using a large language model:
 ### Additional Features
 
 - **Bookmarks** — flag interesting events and review them in a side panel
+- **Bookmark exports** — export bookmarks as CSV or STIX-like `x-oca-event` bundles
 - **Sessions** — save the full analysis state to a local JSON file and restore it later
+- **Session auto-save** — automatic local recovery snapshot every ~30s and on tab blur
 - **Export Reports** — generate HTML or PDF incident reports with selected findings
 - **MITRE ATT&CK Heatmap** — visualise technique coverage across matched Sigma rules
+- **Threat Hunt Playbooks** — one-click investigation presets (lateral movement, credential dumping, persistence)
+- **Rarity Analysis** — rank rare Event IDs, process names, and command lines (least frequent first)
+- **Regex + Saved Search Queries** — reusable plain-text or regex hunts across selector and raw logs views
+- **Raw Logs export** — one-click filtered view export to CSV/TSV
+- **Sigma analyst review notes** — per-rule reviewed / false-positive / confirmed state with notes
+- **Event compare workflow** — compare two events from Raw Logs or Bookmarks side-by-side
+- **Custom YARA rule builder/editor** — create, edit, and manage local custom rules in-browser
+- **Threat actor local repo** — maintain actor IOC sets across investigations
 - **Dark / Light theme** — persisted per browser
 - **Triage scoring** — automatic severity score per event based on matched rules
 

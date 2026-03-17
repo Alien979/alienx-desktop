@@ -42,6 +42,13 @@ interface ProcessInfo {
   entry: LogEntry;
 }
 
+interface SuspiciousParentChild {
+  parent: string;
+  child: string;
+  reason: string;
+  occurrences: ProcessInfo[];
+}
+
 // Muted color palette matching the app theme
 const COLORS = [
   "#60a5fa",
@@ -52,6 +59,28 @@ const COLORS = [
   "#fb923c",
   "#f87171",
   "#94a3b8",
+];
+
+const SUSPICIOUS_PARENT_CHILD_RULES: Array<{
+  parent: RegExp;
+  child: RegExp;
+  reason: string;
+}> = [
+  {
+    parent: /winword\.exe|excel\.exe|powerpnt\.exe|outlook\.exe/i,
+    child: /cmd\.exe|powershell\.exe|wscript\.exe|cscript\.exe/i,
+    reason: "Office spawning script/shell interpreter",
+  },
+  {
+    parent: /acrord32\.exe|chrome\.exe|msedge\.exe|firefox\.exe/i,
+    child: /cmd\.exe|powershell\.exe/i,
+    reason: "Document/browser process spawning shell",
+  },
+  {
+    parent: /rundll32\.exe|regsvr32\.exe|mshta\.exe/i,
+    child: /cmd\.exe|powershell\.exe/i,
+    reason: "LOLBin spawning shell",
+  },
 ];
 
 /**
@@ -329,6 +358,33 @@ export default function ProcessExecutionDashboard({
       .slice(0, 15);
   }, [processEvents]);
 
+  const suspiciousParentChildPairs = useMemo(() => {
+    const grouped = new Map<string, SuspiciousParentChild>();
+    for (const proc of processEvents) {
+      const parent = getExeName(proc.parentImage) || "Unknown";
+      const child = getExeName(proc.image);
+      for (const rule of SUSPICIOUS_PARENT_CHILD_RULES) {
+        if (!rule.parent.test(parent) || !rule.child.test(child)) continue;
+        const key = `${parent}|${child}|${rule.reason}`;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.occurrences.push(proc);
+        } else {
+          grouped.set(key, {
+            parent,
+            child,
+            reason: rule.reason,
+            occurrences: [proc],
+          });
+        }
+      }
+    }
+
+    return Array.from(grouped.values()).sort(
+      (a, b) => b.occurrences.length - a.occurrences.length,
+    );
+  }, [processEvents]);
+
   // Suspicious processes - grouped by process name and parent
   interface SuspiciousMatch {
     processName: string;
@@ -546,7 +602,43 @@ export default function ProcessExecutionDashboard({
           <span className="stat-value">{typosquattingMatches.length}</span>
           <span className="stat-label">Typosquatting Suspects</span>
         </div>
+        <div className="stat-card warning">
+          <span className="stat-value">
+            {suspiciousParentChildPairs.length}
+          </span>
+          <span className="stat-label">Anomalous Parent-Child</span>
+        </div>
       </div>
+
+      {suspiciousParentChildPairs.length > 0 && (
+        <div className="suspicious-section" style={{ marginBottom: 16 }}>
+          <h3>🚩 Anomalous Parent Process Detection</h3>
+          <p className="section-desc">
+            Parent-child process chains commonly associated with abuse patterns.
+          </p>
+          <div className="suspicious-list">
+            {suspiciousParentChildPairs.slice(0, 30).map((item, idx) => (
+              <div key={idx} className="suspicious-item">
+                <div className="suspicious-header">
+                  <span className="suspicious-name">
+                    {item.parent} → {item.child}
+                  </span>
+                </div>
+                <div className="suspicious-path">{item.reason}</div>
+                <div className="suspicious-meta">
+                  <span>Executions: {item.occurrences.length}</span>
+                  <span>
+                    First seen: {item.occurrences[0].timestamp.toLocaleString()}
+                  </span>
+                  {item.occurrences[0].user && (
+                    <span>User: {item.occurrences[0].user}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Process Search */}
       <ProcessSearch

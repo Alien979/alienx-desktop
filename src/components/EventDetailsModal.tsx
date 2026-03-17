@@ -32,6 +32,7 @@ export function EventDetailsModal({
 }: EventDetailsModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedRaw, setCopiedRaw] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"fields" | "json">("fields");
 
@@ -98,6 +99,18 @@ export function EventDetailsModal({
     }
   };
 
+  const handleCopyRaw = useCallback(async () => {
+    const raw = event?.rawLine || "";
+    if (!raw) return;
+    try {
+      await navigator.clipboard.writeText(raw);
+      setCopiedRaw(true);
+      setTimeout(() => setCopiedRaw(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy raw event:", err);
+    }
+  }, [event]);
+
   // Copy a single field value
   const handleCopyField = useCallback(async (key: string, value: string) => {
     try {
@@ -113,6 +126,7 @@ export function EventDetailsModal({
   useEffect(() => {
     if (!isOpen) {
       setCopied(false);
+      setCopiedRaw(false);
     }
   }, [isOpen]);
 
@@ -245,38 +259,58 @@ export function EventDetailsModal({
               </button>
             )}
             {showTagPicker && !bookmarked && (
-              <div style={{ display: "flex", gap: 4 }}>
-                {BOOKMARK_TAGS.map((t) => (
-                  <button
-                    key={t.value}
-                    onClick={() => {
-                      if (eventIndex !== null) {
-                        addBookmark({
-                          eventIndex,
-                          eventId: String(event?.eventId || ""),
-                          timestamp: String(event?.timestamp || ""),
-                          tag: t.value,
-                          note: bookmarkNote,
-                          createdAt: new Date().toISOString(),
-                        });
-                        setBookmarked(true);
-                        setShowTagPicker(false);
-                      }
-                    }}
-                    style={{
-                      background: `${BOOKMARK_COLORS[t.value]}22`,
-                      border: `1px solid ${BOOKMARK_COLORS[t.value]}66`,
-                      color: BOOKMARK_COLORS[t.value],
-                      borderRadius: 4,
-                      padding: "3px 7px",
-                      cursor: "pointer",
-                      fontSize: "0.78rem",
-                    }}
-                    title={t.label}
-                  >
-                    {t.icon} {t.label}
-                  </button>
-                ))}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <textarea
+                  value={bookmarkNote}
+                  onChange={(e) => setBookmarkNote(e.target.value)}
+                  placeholder="Add a note (optional)…"
+                  rows={2}
+                  style={{
+                    resize: "vertical",
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid #444",
+                    borderRadius: 4,
+                    color: "#ccc",
+                    fontSize: "0.78rem",
+                    padding: "4px 8px",
+                    fontFamily: "inherit",
+                    width: "100%",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {BOOKMARK_TAGS.map((t) => (
+                    <button
+                      key={t.value}
+                      onClick={() => {
+                        if (eventIndex !== null) {
+                          addBookmark({
+                            eventIndex,
+                            eventId: String(event?.eventId || ""),
+                            timestamp: String(event?.timestamp || ""),
+                            tag: t.value,
+                            note: bookmarkNote,
+                            createdAt: new Date().toISOString(),
+                          });
+                          setBookmarked(true);
+                          setShowTagPicker(false);
+                        }
+                      }}
+                      style={{
+                        background: `${BOOKMARK_COLORS[t.value]}22`,
+                        border: `1px solid ${BOOKMARK_COLORS[t.value]}66`,
+                        color: BOOKMARK_COLORS[t.value],
+                        borderRadius: 4,
+                        padding: "3px 7px",
+                        cursor: "pointer",
+                        fontSize: "0.78rem",
+                      }}
+                      title={t.label}
+                    >
+                      {t.icon} {t.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -349,6 +383,14 @@ export function EventDetailsModal({
             disabled={copied}
           >
             {copied ? "✓ Copied!" : "📋 Copy as JSON"}
+          </button>
+          <button
+            className="event-modal-button primary"
+            onClick={handleCopyRaw}
+            disabled={copiedRaw || !event?.rawLine}
+            title="Copy original raw XML/text event"
+          >
+            {copiedRaw ? "✓ Copied!" : "📄 Copy Raw XML/Text"}
           </button>
           <button className="event-modal-button secondary" onClick={onClose}>
             Close

@@ -6,6 +6,12 @@ import FileBreakdownStats from "./FileBreakdownStats";
 import { getFileColor } from "../lib/fileColors";
 import { EventDetailsModal } from "./EventDetailsModal";
 import { EventCompare } from "./EventCompare";
+import {
+  getSavedSearchQueries,
+  saveSearchQuery,
+  deleteSearchQuery,
+  SavedSearchQuery,
+} from "../lib/searchPresets";
 import "./Dashboard.css";
 
 const ROW_HEIGHT = 36; // Fixed height per log row for virtual scrolling
@@ -16,6 +22,7 @@ interface RawLogsViewProps {
   filename: string;
   onBack: () => void;
   sigmaMatches?: Map<string, SigmaRuleMatch[]>;
+  initialSearchQuery?: string;
 }
 
 type FilterOperator = "equals" | "contains" | "not_equals" | "not_contains";
@@ -80,6 +87,7 @@ export default function RawLogsView({
   filename,
   onBack,
   sigmaMatches = new Map(),
+  initialSearchQuery,
 }: RawLogsViewProps) {
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
   const [activeFilterColumn, setActiveFilterColumn] = useState<string | null>(
@@ -89,6 +97,12 @@ export default function RawLogsView({
   const [filterOperator, setFilterOperator] =
     useState<FilterOperator>("contains");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery || "");
+  const [searchRegex, setSearchRegex] = useState(false);
+  const [searchRegexError, setSearchRegexError] = useState<string | null>(null);
+  const [savedSearches, setSavedSearches] = useState<SavedSearchQuery[]>(() =>
+    getSavedSearchQueries(),
+  );
   const [scrollTop, setScrollTop] = useState(0);
 
   // Ref for the scrollable log container
@@ -171,19 +185,65 @@ export default function RawLogsView({
     // Then apply column filters
     const activeFilters = filters.filter((f) => f.value);
 
-    if (activeFilters.length === 0) {
-      return entries;
+    let baseEntries = entries;
+    if (activeFilters.length > 0) {
+      baseEntries = entries.filter((entry) => {
+        for (const filter of activeFilters) {
+          if (!matchesFilter(entry, filter)) {
+            return false;
+          }
+        }
+        return true;
+      });
     }
 
-    return entries.filter((entry) => {
-      for (const filter of activeFilters) {
-        if (!matchesFilter(entry, filter)) {
-          return false;
-        }
+    const q = searchQuery.trim();
+    if (q.length < 2) return baseEntries;
+
+    let regex: RegExp | null = null;
+    if (searchRegex) {
+      try {
+        regex = new RegExp(q, "i");
+      } catch {
+        return [];
       }
-      return true;
+    }
+
+    const matchValue = (value: string): boolean => {
+      if (!value) return false;
+      if (regex) return regex.test(value);
+      return value.toLowerCase().includes(q.toLowerCase());
+    };
+
+    return baseEntries.filter((entry) => {
+      if (matchValue(entry.rawLine || "")) return true;
+      if (matchValue(entry.message || "")) return true;
+      if (matchValue(entry.source || "")) return true;
+      if (matchValue(entry.computer || "")) return true;
+      if (matchValue(String(entry.eventId || ""))) return true;
+      if (entry.eventData) {
+        return Object.values(entry.eventData).some((v) => matchValue(v || ""));
+      }
+      return false;
     });
-  }, [data.entries, filters, selectedFile]);
+  }, [data.entries, filters, selectedFile, searchQuery, searchRegex]);
+
+  useEffect(() => {
+    if (!searchRegex) {
+      setSearchRegexError(null);
+      return;
+    }
+    if (searchQuery.trim().length < 2) {
+      setSearchRegexError(null);
+      return;
+    }
+    try {
+      new RegExp(searchQuery.trim(), "i");
+      setSearchRegexError(null);
+    } catch {
+      setSearchRegexError("Invalid regex pattern");
+    }
+  }, [searchRegex, searchQuery]);
 
   // Virtual scrolling: compute visible window
   const containerHeight = 600; // matches CSS max-height
@@ -197,7 +257,9 @@ export default function RawLogsView({
   const offsetY = startIndex * ROW_HEIGHT;
 
   // Reset scroll when filters change (in effect to avoid side-effect during render)
-  const filterKey = `${selectedFile || ""}|${filters.map((f) => `${f.field}:${f.value}`).join(",")}`;
+  const filterKey = `${selectedFile || ""}|${filters
+    .map((f) => `${f.field}:${f.value}`)
+    .join(",")}|${searchQuery}|${searchRegex}`;
   useEffect(() => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
@@ -234,6 +296,80 @@ export default function RawLogsView({
     setIsModalOpen(true);
   };
 
+  const handleSaveSearch = () => {
+    if (searchRegexError) {
+      alert("Fix the regex pattern before saving.");
+      return;
+    }
+
+    const name = window.prompt("Save search as:", searchQuery.trim());
+    if (!name) return;
+    const result = saveSearchQuery({
+      name,
+      query: searchQuery.trim(),
+      regex: searchRegex,
+    });
+    if (!result.ok) {
+      alert(result.error);
+      return;
+    }
+    setSavedSearches(getSavedSearchQueries());
+  };
+
+  const exportFiltered = (format: "csv" | "tsv") => {
+    if (filteredEntries.length === 0) {
+      alert("No rows to export.");
+      return;
+    }
+
+    const delimiter = format === "csv" ? "," : "\t";
+    const ext = format;
+    const headers = [
+      "timestamp",
+      "sourceFile",
+      "eventId",
+      "computer",
+      "source",
+      "message",
+      "rawLine",
+    ];
+
+    const quote = (v: string) => {
+      const value = String(v || "").replace(/\r?\n/g, " ");
+      if (format === "tsv") return value;
+      return `"${value.replace(/"/g, '""')}"`;
+    };
+
+    const rows = [headers.join(delimiter)];
+    for (const entry of filteredEntries) {
+      rows.push(
+        [
+          entry.timestamp instanceof Date
+            ? entry.timestamp.toISOString()
+            : String(entry.timestamp || ""),
+          entry.sourceFile || "",
+          String(entry.eventId || ""),
+          entry.computer || "",
+          entry.source || "",
+          entry.message || "",
+          entry.rawLine || "",
+        ]
+          .map(quote)
+          .join(delimiter),
+      );
+    }
+
+    const blob = new Blob([rows.join("\n")], {
+      type: format === "csv" ? "text/csv" : "text/tab-separated-values",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `raw_logs_filtered.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="dashboard">
       <header className="dashboard-header">
@@ -268,6 +404,122 @@ export default function RawLogsView({
               ? ` (filtered from ${data.entries.length.toLocaleString()} total)`
               : ""}
           </h3>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              marginBottom: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search current logs view..."
+              style={{
+                minWidth: 260,
+                flex: 1,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.14)",
+                borderRadius: 6,
+                padding: "6px 10px",
+                color: "#e5e7eb",
+                fontSize: "0.82rem",
+              }}
+            />
+            <label style={{ fontSize: "0.78rem", color: "#9ca3af" }}>
+              <input
+                type="checkbox"
+                checked={searchRegex}
+                onChange={(e) => setSearchRegex(e.target.checked)}
+                style={{ marginRight: 4 }}
+              />
+              Regex
+            </label>
+            <button
+              className="timeline-button"
+              onClick={handleSaveSearch}
+              disabled={searchQuery.trim().length < 2 || !!searchRegexError}
+            >
+              Save Search
+            </button>
+            <button
+              className="timeline-button"
+              onClick={() => exportFiltered("csv")}
+            >
+              Export CSV
+            </button>
+            <button
+              className="timeline-button"
+              onClick={() => exportFiltered("tsv")}
+            >
+              Export TSV
+            </button>
+          </div>
+          {searchRegexError && (
+            <div
+              style={{ color: "#f87171", fontSize: "0.75rem", marginBottom: 8 }}
+            >
+              {searchRegexError}
+            </div>
+          )}
+          {savedSearches.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                marginBottom: 10,
+              }}
+            >
+              {savedSearches.slice(0, 10).map((preset) => (
+                <span
+                  key={preset.id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 999,
+                    padding: "2px 8px",
+                    fontSize: "0.72rem",
+                    color: "#d1d5db",
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      setSearchQuery(preset.query);
+                      setSearchRegex(preset.regex);
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "inherit",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    {preset.name}
+                  </button>
+                  <button
+                    onClick={() => {
+                      deleteSearchQuery(preset.id);
+                      setSavedSearches(getSavedSearchQueries());
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "#9ca3af",
+                      marginLeft: 6,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* File Breakdown Stats */}
           <FileBreakdownStats
@@ -675,6 +927,28 @@ export default function RawLogsView({
                                   title="View complete event details"
                                 >
                                   👁️
+                                </button>
+                                <button
+                                  className="view-details-btn"
+                                  onClick={() => handleToggleCompare(entry)}
+                                  title={
+                                    compareA === entry || compareB === entry
+                                      ? "Remove from comparison"
+                                      : "Add to comparison"
+                                  }
+                                  style={{
+                                    marginLeft: 2,
+                                    opacity:
+                                      compareA === entry || compareB === entry
+                                        ? 1
+                                        : 0.5,
+                                    color:
+                                      compareA === entry || compareB === entry
+                                        ? "#a855f7"
+                                        : undefined,
+                                  }}
+                                >
+                                  ⚖️
                                 </button>
                               </span>
                             </>
