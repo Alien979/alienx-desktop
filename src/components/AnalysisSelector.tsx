@@ -16,6 +16,7 @@ import "./AnalysisSelector.css";
 export type AnalysisMode =
   | "sigma"
   | "dashboards"
+  | "yara-rule-lab"
   | "process-analysis"
   | "timeline"
   | "raw-logs"
@@ -835,6 +836,23 @@ export default function AnalysisSelector({
                 ? " event ID, computer, source"
                 : " process, host, source"}
               , or message content.
+            </p>
+          </div>
+          <div className="card-arrow">→</div>
+        </div>
+
+        <div
+          className={`analysis-card dashboards ${hoveredCard === "yara-rule-lab" ? "hovered" : ""}`}
+          onClick={() => onSelect("yara-rule-lab")}
+          onMouseEnter={() => setHoveredCard("yara-rule-lab")}
+          onMouseLeave={() => setHoveredCard(null)}
+        >
+          <div className="card-icon">🧪</div>
+          <div className="card-content">
+            <h3>YARA Rule Lab</h3>
+            <p>
+              Create, edit, and tune custom YARA rules in a dedicated authoring
+              workspace.
             </p>
           </div>
           <div className="card-arrow">→</div>

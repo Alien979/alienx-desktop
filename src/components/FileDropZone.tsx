@@ -1,7 +1,6 @@
 import { useState, useCallback } from "react";
 import { isBinaryEVTX } from "../evtxBinaryParser";
 import { parseBinaryEVTXToEntries } from "../lib/evtxWasmParser";
-import { parseLogFile } from "../parser";
 import { isExcelFile, isCsvFile, parseExcelFile } from "../lib/excelParser";
 import { ParsedData } from "../types";
 import { generateSampleData } from "../lib/sampleDataGenerator";
@@ -18,7 +17,11 @@ import {
   collectFilesFromDataTransfer,
   CollectedFile,
 } from "../lib/fileTreeUtils";
+import { parseXmlInWorker } from "../lib/xmlWorkerClient";
 import "./FileDropZone.css";
+import { isTauri } from "../lib/isTauri";
+import { parseCsvFileNative } from "../lib/excelNativeClient";
+import { saveFileToDisk } from "../lib/saveFileToDisk";
 
 interface FileDropZoneProps {
   onFileLoaded: (data: ParsedData, filename: string) => void;
@@ -31,10 +34,24 @@ export default function FileDropZone({
   rulesLoading,
   onOpenSessions,
 }: FileDropZoneProps) {
+  const LARGE_XML_WARNING_MB = 512;
+  const HUGE_XML_COMPACT_MB = 256;
+  const HUGE_XML_MAX_EVENTS = 300000;
+
   const getMaxFileSizeMB = (file: File): number => {
     if (isCsvFile(file)) return 8192; // 8 GB for streamed CSV/TSV
     if (isExcelFile(file)) return 1024; // XLSX/XLS browser memory limit
     return 2000; // EVTX/XML/ZIP
+  };
+
+  const getXmlParseProfile = (fileSizeMB: number) => {
+    const compactMode = fileSizeMB >= HUGE_XML_COMPACT_MB;
+    return {
+      compactMode,
+      maxEvents: compactMode ? HUGE_XML_MAX_EVENTS : undefined,
+      maxEventDataFields: compactMode ? 20 : undefined,
+      maxRawLineLength: compactMode ? 2048 : undefined,
+    };
   };
 
   const [isDragging, setIsDragging] = useState(false);
@@ -127,59 +144,33 @@ export default function FileDropZone({
           onFileLoaded(parsedData, file.name);
           setIsProcessing(false);
         } else {
-          // XML path: Read file in chunks and parse with DOMParser
-          const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunks
-          const fileChunks = Math.ceil(file.size / CHUNK_SIZE);
-          setTotalChunks(fileChunks);
+          if (fileSizeMB >= LARGE_XML_WARNING_MB) {
+            const proceed = window.confirm(
+              `This XML file is very large (${fileSizeMB.toFixed(1)} MB).\n\n` +
+                `For better stability, prefer binary EVTX or CSV exports for very large datasets.\n\n` +
+                `Continue with compact XML parsing mode?`,
+            );
+            if (!proceed) {
+              setIsProcessing(false);
+              return;
+            }
+          }
 
-          setProcessingStatus(`Reading file (${fileSizeMB.toFixed(1)} MB)...`);
-
-          const xmlContent = await new Promise<string>((resolve, reject) => {
-            const chunks: string[] = [];
-            let offset = 0;
-            let loadedChunks = 0;
-
-            const readNextChunk = () => {
-              const blob = file.slice(offset, offset + CHUNK_SIZE);
-              const reader = new FileReader();
-
-              reader.onload = (e) => {
-                chunks.push(e.target?.result as string);
-                offset += CHUNK_SIZE;
-                loadedChunks++;
-
-                setChunksProcessed(loadedChunks);
-                setProcessingStatus(`Reading file chunks...`);
-
-                if (offset < file.size) {
-                  // Read next chunk
-                  readNextChunk();
-                } else {
-                  // All chunks read, combine them
-                  resolve(chunks.join(""));
-                }
-              };
-
-              reader.onerror = () => {
-                reject(new Error("Error reading file"));
-              };
-
-              reader.readAsText(blob);
-            };
-
-            readNextChunk();
-          });
+          setProcessingStatus(`Reading XML (${fileSizeMB.toFixed(1)} MB)...`);
+          const xmlContent = await file.text();
+          const xmlProfile = getXmlParseProfile(fileSizeMB);
 
           // Parse the XML content with progress tracking
           setProcessingStatus("Parsing events from XML...");
-          const parsedData = parseLogFile(
+          const parsedDataFromWorker = await parseXmlInWorker(
             xmlContent,
+            file.name,
+            xmlProfile,
             (processed, total) => {
               setProcessingStatus(
                 `Parsing events: ${processed.toLocaleString()} / ${total.toLocaleString()}`,
               );
             },
-            file.name,
           );
 
           // Call parent with parsed data
@@ -188,7 +179,7 @@ export default function FileDropZone({
           // Use setTimeout to yield to browser and update UI before heavy state update
           await new Promise((resolve) => setTimeout(resolve, 100));
 
-          onFileLoaded(parsedData, file.name);
+          onFileLoaded(parsedDataFromWorker, file.name);
           setIsProcessing(false);
         }
       } catch (error) {
@@ -506,58 +497,46 @@ export default function FileDropZone({
               }
             } else {
               // XML path
-              const CHUNK_SIZE = 10 * 1024 * 1024;
-              const fileChunks = Math.ceil(file.size / CHUNK_SIZE);
-              setTotalChunks(fileChunks);
+              const fileSizeMB = file.size / 1024 / 1024;
+              if (fileSizeMB >= LARGE_XML_WARNING_MB) {
+                const proceed = window.confirm(
+                  `[${i + 1}/${filesToProcess.length}] ${displayName} is ${fileSizeMB.toFixed(1)} MB.\n\n` +
+                    `Large XML can freeze the browser. Continue in compact mode?`,
+                );
+                if (!proceed) {
+                  result.status = "error";
+                  result.error = {
+                    type: ErrorType.FILE_READ_ERROR,
+                    message: "User skipped large XML file",
+                    technicalDetails: "Large XML file skipped by user",
+                    failurePoint: "validation",
+                  };
+                  results.push(result);
+                  continue;
+                }
+              }
+
               setProcessingStatus(
                 `[${i + 1}/${filesToProcess.length}] Reading ${displayName}...`,
               );
 
               try {
-                const xmlContent = await new Promise<string>(
-                  (resolve, reject) => {
-                    const chunks: string[] = [];
-                    let offset = 0;
-                    let loadedChunks = 0;
-
-                    const readNextChunk = () => {
-                      const blob = file.slice(offset, offset + CHUNK_SIZE);
-                      const reader = new FileReader();
-
-                      reader.onload = (e) => {
-                        chunks.push(e.target?.result as string);
-                        offset += CHUNK_SIZE;
-                        loadedChunks++;
-                        setChunksProcessed(loadedChunks);
-
-                        if (offset < file.size) {
-                          readNextChunk();
-                        } else {
-                          resolve(chunks.join(""));
-                        }
-                      };
-
-                      reader.onerror = () =>
-                        reject(new Error(`Error reading ${file.name}`));
-                      reader.readAsText(blob);
-                    };
-
-                    readNextChunk();
-                  },
-                );
+                const xmlContent = await file.text();
+                const xmlProfile = getXmlParseProfile(fileSizeMB);
 
                 // Parse XML
                 setProcessingStatus(
                   `[${i + 1}/${filesToProcess.length}] Parsing events from ${displayName}...`,
                 );
-                const parsedData = parseLogFile(
+                const parsedData = await parseXmlInWorker(
                   xmlContent,
+                  file.name,
+                  xmlProfile,
                   (processed, total) => {
                     setProcessingStatus(
                       `[${i + 1}/${filesToProcess.length}] ${displayName}: ${processed.toLocaleString()} / ${total.toLocaleString()} events`,
                     );
                   },
-                  file.name,
                 );
 
                 result.status = "success";

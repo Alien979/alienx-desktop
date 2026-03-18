@@ -23,6 +23,7 @@ const LazyTimeline = lazy(() => import("./components/Timeline"));
 const LazyRawLogsView = lazy(() => import("./components/RawLogsView"));
 const LazyLLMAnalysis = lazy(() => import("./components/LLMAnalysis"));
 const LazyRarityAnalysis = lazy(() => import("./components/RarityAnalysis"));
+const LazyYaraRuleLab = lazy(() => import("./components/YaraRuleLab"));
 import SessionManager from "./components/SessionManager";
 import BookmarkPanel from "./components/BookmarkPanel";
 import { EventDetailsModal } from "./components/EventDetailsModal";
@@ -101,17 +102,24 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    const autosave = loadAutoSession();
-    if (autosave?.savedAt) {
-      setAutosaveAvailableAt(autosave.savedAt);
-    }
+    let mounted = true;
+    (async () => {
+      const autosave = await loadAutoSession();
+      if (mounted && autosave?.savedAt) {
+        setAutosaveAvailableAt(autosave.savedAt);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
     if (!parsedData) return;
 
     const persist = () => {
-      saveAutoSession(
+      void saveAutoSession(
         filename,
         selectedPlatform || parsedData.platform,
         parsedData,
@@ -292,15 +300,20 @@ function App() {
   );
 
   const handleRestoreAutosave = useCallback(() => {
-    const autosave = loadAutoSession();
-    if (!autosave) return;
-    setAnalysisPlatform(autosave.data.platform);
-    setParsedData(autosave.data);
-    setFilename(autosave.filename);
-    setSelectedPlatform(autosave.platform as SigmaPlatform | null);
-    setSigmaMatches(autosave.matches);
-    setSigmaHasRun(true);
-    setCurrentView("select");
+    void (async () => {
+      const autosave = await loadAutoSession();
+      if (!autosave) {
+        alert("Autosave payload is not available.");
+        return;
+      }
+      setAnalysisPlatform(autosave.data.platform);
+      setParsedData(autosave.data);
+      setFilename(autosave.filename);
+      setSelectedPlatform(autosave.platform as SigmaPlatform | null);
+      setSigmaMatches(autosave.matches);
+      setSigmaHasRun(true);
+      setCurrentView("select");
+    })();
   }, []);
 
   // ── Global keyboard shortcuts ────────────────────────────────
@@ -378,6 +391,10 @@ function App() {
             case "e":
               e.preventDefault();
               handleAnalysisSelect("event-correlation");
+              break;
+            case "y":
+              e.preventDefault();
+              handleAnalysisSelect("yara-rule-lab");
               break;
           }
         }
@@ -516,6 +533,7 @@ function App() {
             setYaraMatches(matches);
             setYaraStats(stats);
           }}
+          onOpenYaraRuleLab={() => setAnalysisMode("yara-rule-lab")}
           playbookFilterId={activePlaybookId}
         />
       </AnalysisErrorBoundary>
@@ -539,6 +557,21 @@ function App() {
           fallback={<LoadingState message="Loading dashboards..." fullPage />}
         >
           <LazyDashboards data={parsedData} onBack={handleBackToSelector} />
+        </Suspense>
+      </AnalysisErrorBoundary>
+    );
+  } else if (analysisMode === "yara-rule-lab") {
+    content = (
+      <AnalysisErrorBoundary>
+        <Suspense
+          fallback={
+            <LoadingState message="Loading YARA Rule Lab..." fullPage />
+          }
+        >
+          <LazyYaraRuleLab
+            platform={parsedData.platform}
+            onBack={handleBackToSelector}
+          />
         </Suspense>
       </AnalysisErrorBoundary>
     );
@@ -701,7 +734,7 @@ function App() {
           <button
             className="timeline-button"
             onClick={() => {
-              clearAutoSession();
+              void clearAutoSession();
               setAutosaveAvailableAt(null);
             }}
           >
@@ -822,6 +855,7 @@ function App() {
                   ["Ctrl+Shift+D", "Open Dashboards"],
                   ["Ctrl+Shift+T", "Open Timeline"],
                   ["Ctrl+Shift+R", "Open Raw Logs"],
+                  ["Ctrl+Shift+Y", "Open YARA Rule Lab"],
                   ["Ctrl+Shift+I", "Open IOC Extraction"],
                   ["Ctrl+Shift+A", "Open Rarity Analysis"],
                   ["Ctrl+Shift+E", "Open Event Correlation"],
@@ -891,6 +925,7 @@ interface SigmaAnalysisViewProps {
     matches: YaraRuleMatch[],
     stats: YaraScanStats | null,
   ) => void;
+  onOpenYaraRuleLab?: () => void;
   playbookFilterId?: string | null;
 }
 
@@ -908,6 +943,7 @@ function SigmaAnalysisView({
   cachedYaraMatches,
   cachedYaraStats,
   onYaraMatchesUpdate,
+  onOpenYaraRuleLab,
   playbookFilterId,
 }: SigmaAnalysisViewProps) {
   // Skip loading screen - rules load in background
@@ -923,6 +959,7 @@ function SigmaAnalysisView({
       cachedYaraMatches={cachedYaraMatches}
       cachedYaraStats={cachedYaraStats}
       onYaraMatchesUpdate={onYaraMatchesUpdate}
+      onOpenYaraRuleLab={onOpenYaraRuleLab}
       playbookFilterId={playbookFilterId}
     />
   );

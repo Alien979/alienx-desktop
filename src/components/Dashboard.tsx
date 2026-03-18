@@ -22,6 +22,7 @@ interface DashboardProps {
     stats: YaraScanStats | null,
   ) => void;
   playbookFilterId?: string | null;
+  onOpenYaraRuleLab?: () => void;
 }
 
 export default function Dashboard({
@@ -36,6 +37,7 @@ export default function Dashboard({
   cachedYaraStats,
   onYaraMatchesUpdate,
   playbookFilterId,
+  onOpenYaraRuleLab,
 }: DashboardProps) {
   // Track if analysis is complete - disable back button until done
   const [isAnalysisComplete, setIsAnalysisComplete] = useState(
@@ -265,6 +267,7 @@ export default function Dashboard({
               events={data.entries}
               platform={data.platform}
               onOpenRawLogs={onOpenRawLogs}
+              onOpenRuleLab={onOpenYaraRuleLab}
               cachedMatches={cachedYaraMatches}
               cachedStats={cachedYaraStats}
               onMatchesUpdate={onYaraMatchesUpdate}

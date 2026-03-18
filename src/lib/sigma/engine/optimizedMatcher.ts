@@ -11,6 +11,7 @@
 import { CompiledSigmaRule, SigmaRuleMatch, SigmaLogSource } from "../types";
 import { matchRule, preIndexEventFields } from "./matcher";
 import { LogEntry } from "../../../types";
+import { runSigmaPrefilterNative } from "./nativePrefilterClient";
 
 /**
  * Category to EventID mapping based on SIGMA taxonomy (sigma-appendix-taxonomy.md)
@@ -572,7 +573,7 @@ export function groupRulesByEventID(rules: CompiledSigmaRule[]): RuleGroup[] {
  * Quick-reject filter for a rule
  * Extracts key field requirements that can be checked quickly
  */
-interface QuickFilter {
+export interface QuickFilter {
   field: string;
   type: "endswith" | "contains" | "startswith" | "equals";
   values: string[];
@@ -884,13 +885,25 @@ export async function processEventsOptimized(
   if (!isLinuxDataset) {
     const availableEventIds = new Set<number>();
     for (const eventId of eventIndex.keys()) {
-      if (eventId !== undefined) {
+      // Ignore undefined/zero/negative EventIDs. Some imported datasets may
+      // not carry canonical EventID fields even when events are valid.
+      if (eventId !== undefined && Number.isFinite(eventId) && eventId > 0) {
         availableEventIds.add(eventId);
       }
     }
-    const filtered = filterRulesByAvailableEventIDs(rules, availableEventIds);
-    filteredRules = filtered.filteredRules;
-    rulesFilteredByEventID = filtered.skippedCount;
+
+    // Only apply EventID pre-filtering when we have at least one valid EventID.
+    // If we don't, keep all rules to avoid false zero-detection runs.
+    if (availableEventIds.size > 0) {
+      const filtered = filterRulesByAvailableEventIDs(rules, availableEventIds);
+
+      // Safety fallback: if pre-filtering wipes out all rules, revert to full
+      // rule set rather than returning no detections.
+      if (filtered.filteredRules.length > 0) {
+        filteredRules = filtered.filteredRules;
+        rulesFilteredByEventID = filtered.skippedCount;
+      }
+    }
   }
 
   // Step 3: Group filtered rules by EventID requirements (Windows only)
@@ -963,6 +976,125 @@ export async function processEventsOptimized(
     targetEvents: LogEntry[],
     groupRules: CompiledSigmaRule[],
   ) => {
+    const filterableRules = groupRules.filter((rule) => {
+      const filters = ruleQuickFilters.get(rule.rule.id) || [];
+      return filters.length > 0;
+    });
+
+    const nonFilterableRules = groupRules.filter((rule) => {
+      const filters = ruleQuickFilters.get(rule.rule.id) || [];
+      return filters.length === 0;
+    });
+
+    const nativePrefilter = await runSigmaPrefilterNative(
+      targetEvents,
+      filterableRules.map((rule) => ({
+        id: rule.rule.id,
+        filters: (ruleQuickFilters.get(rule.rule.id) || []).map((f) => ({
+          field: f.field,
+          type: f.type,
+          values: f.values,
+        })),
+      })),
+      (nativeProgress) => {
+        if (!onProgress) return;
+
+        // Rust prefilter progress contributes only to currently processed group.
+        const projectedProcessed =
+          completedWorkUnits +
+          Math.min(
+            nativeProgress.processed,
+            targetEvents.length * filterableRules.length,
+          );
+
+        onProgress(projectedProcessed, totalWorkUnits, {
+          rulesSkipped,
+          eventRuleComparisons,
+          quickRejects: quickRejects + nativeProgress.quickRejects,
+          matchesFound: totalMatches,
+        });
+      },
+    );
+
+    if (nativePrefilter) {
+      const comparisonsForPrefilter =
+        targetEvents.length * filterableRules.length;
+      const candidateMap = nativePrefilter.candidatesByRule;
+
+      quickRejects += nativePrefilter.stats.quickRejects;
+      eventRuleComparisons += nativePrefilter.stats.candidateComparisons;
+      completedWorkUnits += comparisonsForPrefilter;
+
+      // Run full semantic matching only on candidate pairs selected by Rust prefilter.
+      for (const rule of filterableRules) {
+        const indices = candidateMap.get(rule.rule.id) || [];
+        for (const idx of indices) {
+          const event = targetEvents[idx];
+          if (!event) continue;
+
+          try {
+            const match = matchRule(event, rule);
+            if (match) {
+              const existing = matchesByRule.get(match.rule.id) || [];
+              existing.push(match);
+              matchesByRule.set(match.rule.id, existing);
+              totalMatches++;
+            }
+          } catch {
+            // Swallow per-rule errors so one bad rule can't abort the whole scan
+          }
+        }
+      }
+
+      // For rules without quick filters, keep existing TS flow.
+      for (let i = 0; i < targetEvents.length; i += chunkSize) {
+        const chunk = targetEvents.slice(i, i + chunkSize);
+
+        for (const event of chunk) {
+          for (const rule of nonFilterableRules) {
+            eventRuleComparisons++;
+            completedWorkUnits++;
+
+            try {
+              const match = matchRule(event, rule);
+              if (match) {
+                const existing = matchesByRule.get(match.rule.id) || [];
+                existing.push(match);
+                matchesByRule.set(match.rule.id, existing);
+                totalMatches++;
+              }
+            } catch {
+              // Swallow per-rule errors so one bad rule can't abort the whole scan
+            }
+          }
+        }
+
+        if (onProgress) {
+          onProgress(completedWorkUnits, totalWorkUnits, {
+            rulesSkipped,
+            eventRuleComparisons,
+            quickRejects,
+            matchesFound: totalMatches,
+          });
+        }
+
+        const isBackground = typeof document !== "undefined" && document.hidden;
+        if (!isBackground) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+
+      if (onProgress) {
+        onProgress(completedWorkUnits, totalWorkUnits, {
+          rulesSkipped,
+          eventRuleComparisons,
+          quickRejects,
+          matchesFound: totalMatches,
+        });
+      }
+      return;
+    }
+
     // Process events in chunks for this rule group
     for (let i = 0; i < targetEvents.length; i += chunkSize) {
       const chunk = targetEvents.slice(i, i + chunkSize);

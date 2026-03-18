@@ -1,6 +1,16 @@
 import { LogEntry } from "../types";
 import { PlatformLogParser } from "./types";
 
+interface WindowsEvtxParserOptions {
+  compactMode?: boolean;
+  maxEvents?: number;
+  maxEventDataFields?: number;
+  maxRawLineLength?: number;
+}
+
+const DEFAULT_MAX_EVENT_DATA_FIELDS = 25;
+const DEFAULT_COMPACT_RAWLINE_LIMIT = 2048;
+
 function getLevelName(level: string): string {
   const levelMap: Record<string, string> = {
     "0": "LogAlways",
@@ -17,6 +27,7 @@ export function parseWindowsEvtxXml(
   content: string,
   onProgress?: (processed: number, total: number) => void,
   sourcePath?: string,
+  options: WindowsEvtxParserOptions = {},
 ): LogEntry[] {
   const entries: LogEntry[] = [];
   const parser = new DOMParser();
@@ -30,13 +41,16 @@ export function parseWindowsEvtxXml(
   }
 
   const events = xmlDoc.querySelectorAll("Event");
-  const totalEvents = events.length;
+  const totalEvents = options.maxEvents
+    ? Math.min(events.length, options.maxEvents)
+    : events.length;
   if (onProgress) onProgress(0, totalEvents);
 
-  events.forEach((event, index) => {
+  for (let index = 0; index < totalEvents; index++) {
+    const event = events[index];
     try {
       const system = event.querySelector("System");
-      if (!system) return;
+      if (!system) continue;
 
       const eventIdElem = system.querySelector("EventID");
       const levelElem = system.querySelector("Level");
@@ -46,14 +60,23 @@ export function parseWindowsEvtxXml(
 
       const eventDataMap: Record<string, string> = {};
       let ip = "N/A";
+      let eventDataCount = 0;
 
       const dataElements = event.querySelectorAll("Data");
       dataElements.forEach((data) => {
+        const maxEventDataFields =
+          options.maxEventDataFields ?? DEFAULT_MAX_EVENT_DATA_FIELDS;
+        if (options.compactMode && eventDataCount >= maxEventDataFields) return;
+
         const name = data.getAttribute("Name");
         const value = data.textContent || "";
         if (!name) return;
 
-        eventDataMap[name] = value;
+        eventDataMap[name] =
+          options.compactMode && value.length > 256
+            ? `${value.slice(0, 256)}...`
+            : value;
+        eventDataCount += 1;
 
         if (
           name.includes("IpAddress") ||
@@ -109,6 +132,13 @@ export function parseWindowsEvtxXml(
         rawLine = event.textContent || "";
       }
 
+      const maxRawLength = options.compactMode
+        ? (options.maxRawLineLength ?? DEFAULT_COMPACT_RAWLINE_LIMIT)
+        : options.maxRawLineLength;
+      if (maxRawLength && rawLine.length > maxRawLength) {
+        rawLine = `${rawLine.slice(0, maxRawLength)}...`;
+      }
+
       entries.push({
         timestamp,
         ip,
@@ -122,7 +152,10 @@ export function parseWindowsEvtxXml(
         source,
         computer,
         host: computer,
-        message,
+        message:
+          options.compactMode && message.length > 1024
+            ? `${message.slice(0, 1024)}...`
+            : message,
         eventData: Object.keys(eventDataMap).length ? eventDataMap : undefined,
         sourceFile: sourcePath,
         platform: "windows",
@@ -135,7 +168,7 @@ export function parseWindowsEvtxXml(
     } catch {
       // Skip malformed events and continue parsing.
     }
-  });
+  }
 
   if (onProgress) onProgress(totalEvents, totalEvents);
   return entries;

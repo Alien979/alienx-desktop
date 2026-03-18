@@ -15,7 +15,9 @@
     "bundle:sigma": "node scripts/bundle-sigma-rules.js",
     "bundle:yara": "node scripts/bundle-yara-rules.js",
     "generate:samples": "node scripts/generate-samples-manifest.js",
-    "refresh:rules": "npm run sync:sigma && npm run sync:yara && npm run bundle:sigma && npm run bundle:yara && npm run generate:samples"
+    "refresh:rules": "npm run sync:sigma && npm run sync:yara && npm run bundle:sigma && npm run bundle:yara && npm run generate:samples",
+    "bench:sigma:ts": "node scripts/benchmark-sigma-prefilter.js",
+    "bench:sigma:rust": "cd src-tauri && cargo run --release --bin sigma_prefilter_bench"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
