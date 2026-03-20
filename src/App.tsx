@@ -1001,7 +1001,7 @@ function TimelineAnalysisView({
           <SigmaDetections
             events={data.entries}
             sigmaEngine={sigmaEngine}
-            onMatchesUpdate={(matches) => {
+            onMatchesUpdate={(matches: Map<string, SigmaRuleMatch[]>) => {
               setSigmaMatches(matches);
               setHasProcessed(true);
             }}

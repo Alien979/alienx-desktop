@@ -36,7 +36,7 @@ export default function Dashboard({
   cachedYaraMatches,
   cachedYaraStats,
   onYaraMatchesUpdate,
-  playbookFilterId,
+  playbookFilterId: _playbookFilterId,
   onOpenYaraRuleLab,
 }: DashboardProps) {
   // Track if analysis is complete - disable back button until done
@@ -259,7 +259,7 @@ export default function Dashboard({
               onMatchesUpdate={handleAnalysisComplete}
               cachedMatches={cachedMatches}
               sourceFiles={data.sourceFiles}
-              playbookFilterId={playbookFilterId}
+              // playbookFilterId={playbookFilterId}
             />
           </div>
           <div className="sigma-section">

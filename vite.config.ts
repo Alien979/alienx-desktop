@@ -4,43 +4,35 @@ import { copyFileSync, mkdirSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 
 // Plugin to copy samples folder to dist during build
-function copySamplesPlugin() {
+
+// Plugin to copy samples and WASM files to dist during build
+function copyAssetsPlugin() {
   return {
-    name: "copy-samples",
+    name: "copy-assets",
     closeBundle() {
-      const shouldExclude = (entry: string) => {
-        // Exclude hidden files, git files, and common unwanted files
-        return (
-          entry.startsWith(".") ||
-          entry === ".git" ||
-          entry === ".gitignore" ||
-          entry === ".DS_Store" ||
-          entry === "Thumbs.db" ||
-          entry === "desktop.ini"
-        );
-      };
-
-      const shouldIncludeFile = (filename: string) => {
-        // Only include EVTX files (case-insensitive)
-        return filename.toLowerCase().endsWith(".evtx");
-      };
-
-      const copyRecursive = (src: string, dest: string) => {
+      // Copy EVTX samples
+      const shouldExclude = (entry) =>
+        entry.startsWith(".") ||
+        [
+          ".git",
+          ".gitignore",
+          ".DS_Store",
+          "Thumbs.db",
+          "desktop.ini",
+        ].includes(entry);
+      const shouldIncludeFile = (filename) =>
+        filename.toLowerCase().endsWith(".evtx");
+      const copyRecursive = (src, dest) => {
         try {
           mkdirSync(dest, { recursive: true });
           const entries = readdirSync(src);
           for (const entry of entries) {
-            // Skip excluded files/folders
-            if (shouldExclude(entry)) {
-              continue;
-            }
-
+            if (shouldExclude(entry)) continue;
             const srcPath = join(src, entry);
             const destPath = join(dest, entry);
             if (statSync(srcPath).isDirectory()) {
               copyRecursive(srcPath, destPath);
             } else {
-              // Only copy EVTX files
               if (shouldIncludeFile(entry)) {
                 copyFileSync(srcPath, destPath);
                 console.log(`Copied: ${srcPath} -> ${destPath}`);
@@ -52,12 +44,33 @@ function copySamplesPlugin() {
         }
       };
       copyRecursive("samples", "dist/samples");
+
+      // Copy WASM and JS glue files to both dist/wasm and public/wasm
+      const wasmSrcDir = join(__dirname, "src", "wasm");
+      const wasmDistDir = join(__dirname, "dist", "wasm");
+      const wasmPublicDir = join(__dirname, "public", "wasm");
+      mkdirSync(wasmDistDir, { recursive: true });
+      mkdirSync(wasmPublicDir, { recursive: true });
+      ["evtx_wasm.js", "evtx_wasm_bg.wasm"].forEach((file) => {
+        try {
+          copyFileSync(join(wasmSrcDir, file), join(wasmDistDir, file));
+          copyFileSync(join(wasmSrcDir, file), join(wasmPublicDir, file));
+          console.log(
+            `Copied: ${join(wasmSrcDir, file)} -> ${join(wasmDistDir, file)}`,
+          );
+          console.log(
+            `Copied: ${join(wasmSrcDir, file)} -> ${join(wasmPublicDir, file)}`,
+          );
+        } catch (e) {
+          console.warn(`Failed to copy WASM asset: ${file}`);
+        }
+      });
     },
   };
 }
 
 export default defineConfig({
-  plugins: [react(), copySamplesPlugin()],
+  plugins: [react(), copyAssetsPlugin()],
 
   // Enable WASM support
   assetsInclude: ["**/*.wasm"],
@@ -82,10 +95,6 @@ export default defineConfig({
         },
       },
     },
-  },
-  server: {
-    port: 5173,
-    strictPort: true,
   },
 
   server: {

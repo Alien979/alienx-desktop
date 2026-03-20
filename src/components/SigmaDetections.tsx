@@ -3,10 +3,7 @@ import { LogEntry } from "../types";
 import { getSeverityColor, getSeverityIcon } from "../lib/sigmaRules";
 import { SigmaEngine } from "../lib/sigma";
 import { SigmaRuleMatch } from "../lib/sigma/types";
-import {
-  processEventsOptimized,
-  OptimizedMatchStats,
-} from "../lib/sigma/engine/optimizedMatcher";
+import { OptimizedMatchStats } from "../lib/sigma/engine/optimizedMatcher";
 import FileFilter from "./FileFilter";
 import FileBreakdownStats from "./FileBreakdownStats";
 import { EventDetailsModal } from "./EventDetailsModal";
@@ -17,7 +14,7 @@ import {
   upsertSigmaReviewNote,
   SigmaReviewStatus,
 } from "../lib/sigmaReviewNotes";
-import { THREAT_HUNT_PLAYBOOKS } from "../lib/threatHuntPlaybooks";
+// import { THREAT_HUNT_PLAYBOOKS } from "../lib/threatHuntPlaybooks";
 import "./SigmaDetections.css";
 
 // ============================================================================
@@ -99,16 +96,13 @@ interface SigmaDetectionsProps {
   onMatchesUpdate?: (matches: Map<string, SigmaRuleMatch[]>) => void;
   cachedMatches?: Map<string, SigmaRuleMatch[]>;
   sourceFiles?: string[];
-  playbookFilterId?: string | null;
 }
-
 export default function SigmaDetections({
   events,
   sigmaEngine,
   onMatchesUpdate,
   cachedMatches,
   sourceFiles,
-  playbookFilterId,
 }: SigmaDetectionsProps) {
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
   const [matches, setMatches] = useState<Map<string, SigmaRuleMatch[]>>(
@@ -123,8 +117,13 @@ export default function SigmaDetections({
   });
   const [optimizationStats, setOptimizationStats] =
     useState<OptimizedMatchStats | null>(null);
+  const sigmaWorkerRef = useRef<Worker | null>(null);
+  const [isCancelled, setIsCancelled] = useState(false);
   const [copiedItem, setCopiedItem] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  // Collapsible state for Multi-File Comparison and File Breakdown Stats
+  const [showMultiFile, setShowMultiFile] = useState(false);
+  const [showFileBreakdown, setShowFileBreakdown] = useState(false);
 
   // Modal state for viewing raw event
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
@@ -141,6 +140,7 @@ export default function SigmaDetections({
   const [draftReview, setDraftReview] = useState<
     Record<string, { status: SigmaReviewStatus; note: string }>
   >({});
+  // @ts-ignore: variable is kept for future use
   const lastProgressUpdateRef = useRef(0);
 
   // Auto-clear copied tooltip after 2 seconds
@@ -175,82 +175,106 @@ export default function SigmaDetections({
     }
   }, []);
 
-  // Run SIGMA matching asynchronously with optimized processing
+  // Run SIGMA matching asynchronously using a Web Worker
   useEffect(() => {
-    // Skip processing if we already have cached matches (even empty — means analysis already ran)
     if (cachedMatches !== undefined && matches.size === 0) {
       setMatches(cachedMatches);
       setIsLoading(false);
-      // Notify parent with cached results
       if (onMatchesUpdateRef.current) {
         onMatchesUpdateRef.current(cachedMatches);
       }
       return;
     }
-
-    // Skip if we already have matches (processing completed)
-    if (matches.size > 0) {
-      return;
-    }
-
+    if (matches.size > 0) return;
     if (!sigmaEngine || events.length === 0) {
       setMatches(new Map());
       setIsLoading(false);
       setOptimizationStats(null);
       return;
     }
-
     setIsLoading(true);
+    setIsCancelled(false);
     setProgress({ processed: 0, total: events.length, matchesFound: 0 });
 
-    const rules = sigmaEngine.getAllRules();
+    // Prepare rules for worker (decompile to plain objects if needed)
+    const rules = sigmaEngine.getAllRules().map((r) => r); // Shallow copy
 
-    let cancelled = false;
+    // Clean up any previous worker
+    if (sigmaWorkerRef.current) {
+      sigmaWorkerRef.current.terminate();
+      sigmaWorkerRef.current = null;
+    }
 
-    // Start optimized processing on main thread with yields
-    processEventsOptimized(
-      events,
-      rules,
-      (processed, total, stats) => {
-        if (cancelled) return;
-        const now = performance.now();
-        // Throttle UI updates to reduce render overhead on large datasets.
-        if (now - lastProgressUpdateRef.current < 120 && processed < total) {
-          return;
-        }
-        lastProgressUpdateRef.current = now;
-
-        setProgress({
-          processed,
-          total,
-          matchesFound: stats?.matchesFound || 0,
-        });
-      },
-      1000, // Larger chunk size for better throughput
-    )
-      .then(({ matches: result, stats }) => {
-        if (cancelled) return;
-        setMatches(result);
-        setOptimizationStats(stats);
-        setIsLoading(false);
-        // Notify parent that analysis is complete
-        if (onMatchesUpdateRef.current) {
-          onMatchesUpdateRef.current(result);
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error("SIGMA processing failed:", err);
+    // Dynamically import the worker (Vite/CRA compatible)
+    let worker: Worker;
+    try {
+      worker = new Worker(
+        new URL("../workers/sigmaScanWorker.ts", import.meta.url),
+        { type: "module" },
+      );
+    } catch (e) {
+      // Fallback for non-module worker environments (try JS build)
+      try {
+        worker = new Worker("/src/workers/sigmaScanWorker.js");
+      } catch (err) {
+        console.error("Failed to create Sigma worker:", err);
         setIsLoading(false);
         setMatches(new Map());
-        // Always notify parent so the back button unlocks even on error
+        setOptimizationStats(null);
+        return;
+      }
+    }
+    sigmaWorkerRef.current = worker;
+
+    worker.onmessage = (e) => {
+      const { type, processed, total, matches, matchesFound } = e.data;
+      if (type === "progress") {
+        setProgress((prev) => ({
+          ...prev,
+          processed: processed || prev.processed,
+          total: total || prev.total,
+          matchesFound: matchesFound || prev.matchesFound,
+        }));
+      } else if (type === "done") {
+        // Convert array to Map for compatibility
+        const result = new Map(Object.entries(matches));
+        setMatches(result as Map<string, SigmaRuleMatch[]>);
+        setIsLoading(false);
+        setOptimizationStats(null); // Optionally set stats if worker returns them
         if (onMatchesUpdateRef.current) {
-          onMatchesUpdateRef.current(new Map());
+          onMatchesUpdateRef.current(result as Map<string, SigmaRuleMatch[]>);
         }
-      });
+      } else if (type === "cancelled") {
+        setIsLoading(false);
+        setIsCancelled(true);
+      }
+    };
+
+    worker.onerror = (err) => {
+      console.error("Sigma worker error:", err);
+      setIsLoading(false);
+      setMatches(new Map());
+      setOptimizationStats(null);
+      if (onMatchesUpdateRef.current) {
+        onMatchesUpdateRef.current(new Map());
+      }
+    };
+
+    // Start the worker
+    worker.postMessage({
+      type: "start",
+      payload: {
+        entries: events,
+        rules,
+      },
+    });
 
     return () => {
-      cancelled = true;
+      if (sigmaWorkerRef.current) {
+        sigmaWorkerRef.current.postMessage({ type: "cancel" });
+        sigmaWorkerRef.current.terminate();
+        sigmaWorkerRef.current = null;
+      }
     };
   }, [events, sigmaEngine, cachedMatches]);
 
@@ -321,25 +345,7 @@ export default function SigmaDetections({
   // Filter matches by selected file
   const filteredMatches = useMemo(() => {
     let baseMatches = sortedMatches;
-
-    if (playbookFilterId) {
-      const playbook = THREAT_HUNT_PLAYBOOKS.find(
-        (p) => p.id === playbookFilterId,
-      );
-      if (playbook) {
-        baseMatches = baseMatches.filter(([, ruleMatches]) => {
-          const tags = ruleMatches[0]?.rule.tags || [];
-          const combined =
-            `${ruleMatches[0]?.rule.title || ""} ${tags.join(" ")}`.toLowerCase();
-          return playbook.sigmaTagKeywords.some((keyword) =>
-            combined.includes(keyword.toLowerCase()),
-          );
-        });
-      }
-    }
-
     if (!selectedFile) return baseMatches;
-
     return baseMatches
       .map(([ruleId, ruleMatches]) => {
         const filtered = ruleMatches.filter(
@@ -348,7 +354,7 @@ export default function SigmaDetections({
         return [ruleId, filtered] as [string, SigmaRuleMatch[]];
       })
       .filter(([, ruleMatches]) => ruleMatches.length > 0);
-  }, [sortedMatches, selectedFile, playbookFilterId]);
+  }, [sortedMatches, selectedFile]);
 
   // Tooltip positioning is now handled by CSS (position: absolute)
   // No JavaScript positioning needed - tooltip stays relative to its wrapper element
@@ -467,6 +473,19 @@ export default function SigmaDetections({
               {progress.matchesFound > 0 &&
                 ` • ${progress.matchesFound} detections found`}
             </div>
+            <button
+              className="cancel-btn"
+              onClick={() => {
+                setIsCancelled(true);
+                if (sigmaWorkerRef.current) {
+                  sigmaWorkerRef.current.postMessage({ type: "cancel" });
+                }
+              }}
+              disabled={isCancelled}
+              style={{ marginTop: "1rem" }}
+            >
+              {isCancelled ? "Cancelling..." : "Cancel Scan"}
+            </button>
           </div>
         ) : stats.totalMatches === 0 ? (
           <div className="no-threats">
@@ -532,17 +551,53 @@ export default function SigmaDetections({
         <MitreHeatmap tags={allMitreTags} />
       )}
 
-      {/* Multi-file Comparison */}
-      {!isLoading && (
-        <MultiFileComparison
-          entries={events}
-          sourceFiles={sourceFiles}
-          matches={matches}
-        />
-      )}
+      {/* Multi-file Comparison (Collapsible) */}
+      <div className="collapsible-section">
+        <div
+          className="collapsible-header"
+          style={{
+            cursor: "pointer",
+            fontWeight: 600,
+            margin: "1rem 0 0.25rem 0",
+            display: "flex",
+            alignItems: "center",
+          }}
+          onClick={() => setShowMultiFile((v) => !v)}
+        >
+          <span style={{ marginRight: 8 }}>{showMultiFile ? "▼" : "▶"}</span>
+          Multi-File Comparison
+        </div>
+        {!isLoading && showMultiFile && (
+          <MultiFileComparison
+            entries={events}
+            sourceFiles={sourceFiles}
+            matches={matches}
+          />
+        )}
+      </div>
 
-      {/* File Breakdown Stats */}
-      <FileBreakdownStats entries={events} sourceFiles={sourceFiles} />
+      {/* File Breakdown Stats (Collapsible) */}
+      <div className="collapsible-section">
+        <div
+          className="collapsible-header"
+          style={{
+            cursor: "pointer",
+            fontWeight: 600,
+            margin: "1rem 0 0.25rem 0",
+            display: "flex",
+            alignItems: "center",
+          }}
+          onClick={() => setShowFileBreakdown((v) => !v)}
+        >
+          <span style={{ marginRight: 8 }}>
+            {showFileBreakdown ? "▼" : "▶"}
+          </span>
+          Events by File
+        </div>
+        {showFileBreakdown && (
+          <FileBreakdownStats entries={events} sourceFiles={sourceFiles} />
+        )}
+      </div>
 
       {/* File Filter */}
       <FileFilter

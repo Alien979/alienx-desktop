@@ -1,3 +1,106 @@
+/* Modern Progress Bar */
+.modern-progress {
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  padding: 2rem 2.5rem;
+  margin: 2rem auto;
+  max-width: 420px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2rem;
+}
+.modern-progress .progress-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.modern-progress .progress-bar-outer {
+  width: 100%;
+  height: 18px;
+  background: var(--bg-primary);
+  border-radius: 9px;
+  border: 1px solid var(--border-primary);
+  overflow: hidden;
+  margin: 0.5rem 0 0.2rem 0;
+}
+.modern-progress .progress-bar-inner {
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa 0%, #06b6d4 100%);
+  border-radius: 9px 0 0 9px;
+  transition: width 0.3s cubic-bezier(0.4, 2, 0.6, 1);
+}
+.modern-progress .progress-label {
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.modern-progress .progress-tip {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  margin-top: 0.2rem;
+}
+
+/* Modern Analytics Summary */
+.modern-analytics {
+  margin: 1.5rem 0 2.5rem 0;
+  padding: 1.5rem 2rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.modern-analytics h4 {
+  font-size: 1.2rem;
+  color: var(--accent-blue);
+  margin-bottom: 1.2rem;
+}
+.analytics-cards {
+  display: flex;
+  gap: 2.5rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.analytics-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 10px;
+  padding: 1.1rem 1.5rem;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.03);
+  margin-bottom: 0.5rem;
+}
+.analytics-label {
+  font-size: 0.92rem;
+  color: var(--text-dim);
+  margin-bottom: 0.3rem;
+}
+.analytics-value {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.analytics-value.chains {
+  color: var(--accent-blue);
+}
+.analytics-value.avg {
+  color: var(--accent-green);
+}
+.analytics-value.procs {
+  color: var(--accent-purple);
+  font-size: 1.05rem;
+}
+.analytics-value.score {
+  color: var(--accent-red);
+}
 .event-correlation {
   min-height: 100vh;
   background: var(--bg-primary);

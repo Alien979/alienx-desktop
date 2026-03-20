@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-18T11:20:19.567Z",
+  "generatedAt": "2026-03-19T19:55:55.527Z",
   "sources": [
     {
       "id": "yara-rules",
@@ -62,7 +62,7 @@
         "name": "Yara-Rules",
         "repo": "https://github.com/Yara-Rules/rules.git",
         "branch": "master",
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 566,
         "byPlatform": {
           "windows": 64,
@@ -74,7 +74,7 @@
         "name": "Neo23x0 Signature-Base",
         "repo": "https://github.com/Neo23x0/signature-base.git",
         "branch": "master",
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 738,
         "byPlatform": {
           "windows": 60,
@@ -86,7 +86,7 @@
         "name": "ReversingLabs YARA Rules",
         "repo": "https://github.com/reversinglabs/reversinglabs-yara-rules.git",
         "branch": null,
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 310,
         "byPlatform": {
           "windows": 246,
@@ -98,7 +98,7 @@
         "name": "Advanced Threat Research YARA Rules",
         "repo": "https://github.com/advanced-threat-research/Yara-Rules.git",
         "branch": "master",
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 125,
         "byPlatform": {
           "windows": 6,
@@ -110,7 +110,7 @@
         "name": "Elastic Protections Artifacts",
         "repo": "https://github.com/elastic/protections-artifacts.git",
         "branch": null,
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 668,
         "byPlatform": {
           "windows": 385,
@@ -122,7 +122,7 @@
         "name": "bartblaze Yara-Rules",
         "repo": "https://github.com/bartblaze/Yara-Rules.git",
         "branch": "master",
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 110,
         "byPlatform": {
           "windows": 5,
@@ -134,7 +134,7 @@
         "name": "InQuest Community YARA Rules",
         "repo": "https://github.com/InQuest/yara-rules.git",
         "branch": "master",
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 38,
         "byPlatform": {
           "windows": 8,
@@ -146,7 +146,7 @@
         "name": "Malpedia Signator Rules",
         "repo": "https://github.com/malpedia/signator-rules.git",
         "branch": "main",
-        "revision": "24b1edfcaf592d3a03db031636f920af9a7794f0",
+        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
         "totalFiles": 1620,
         "byPlatform": {
           "windows": 58,

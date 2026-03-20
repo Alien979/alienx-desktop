@@ -20,8 +20,7 @@ import {
 import { parseXmlInWorker } from "../lib/xmlWorkerClient";
 import "./FileDropZone.css";
 import { isTauri } from "../lib/isTauri";
-import { parseCsvFileNative } from "../lib/excelNativeClient";
-import { saveFileToDisk } from "../lib/saveFileToDisk";
+import { parseFolderNative } from "../lib/folderNativeClient";
 
 interface FileDropZoneProps {
   onFileLoaded: (data: ParsedData, filename: string) => void;
@@ -319,6 +318,45 @@ export default function FileDropZone({
   const handleFiles = useCallback(
     async (files: CollectedFile[]) => {
       if (files.length === 0) return;
+
+      // Tauri native folder parsing path
+      if (isTauri() && files.length > 1) {
+        // Try to find a common folder path (all files share the same parent)
+        const folderPaths = files
+          .map((f) =>
+            f.relativePath ? f.relativePath.split("/")[0] : undefined,
+          )
+          .filter((v): v is string => !!v);
+        const uniqueFolders = Array.from(new Set(folderPaths));
+        if (uniqueFolders.length === 1) {
+          const folderPath = uniqueFolders[0];
+          setIsProcessing(true);
+          setProcessingStatus("Parsing folder natively (Rust backend)...");
+          try {
+            // Call Rust backend
+            const entries = await parseFolderNative(folderPath);
+            const parsedData = {
+              entries,
+              format: "mixed" as const,
+              platform: "windows" as const,
+              totalLines: entries.length,
+              parsedLines: entries.length,
+              sourceFiles: [folderPath],
+            };
+            setProcessingStatus("Loading analysis selector...");
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            onFileLoaded(parsedData, folderPath);
+            setIsProcessing(false);
+            return;
+          } catch (error) {
+            alert(
+              `Error processing folder natively: ${error instanceof Error ? error.message : "Unknown error"}`,
+            );
+            setIsProcessing(false);
+            return;
+          }
+        }
+      }
 
       setIsProcessing(true);
       setProcessingStatus("Checking for ZIP archives...");

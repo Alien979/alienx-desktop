@@ -1,5 +1,6 @@
 // Utility to save a File object to disk in Tauri (desktop)
 // Returns the absolute path to the saved file
+// @ts-ignore
 import { writeBinaryFile, BaseDirectory } from "@tauri-apps/api/fs";
 import { join } from "@tauri-apps/api/path";
 

@@ -94,11 +94,9 @@ export async function parseBinaryEVTXWithWasm(
     const buffer = await file.arrayBuffer();
     const data = new Uint8Array(buffer);
 
-    // Import and initialize WASM module
-    const wasmModule = await import("../wasm/evtx_wasm.js");
-    await wasmModule.default();
-
-    const { EvtxWasmParser } = wasmModule;
+    // Import and initialize WASM module using Vite-compatible loader
+    const { loadEvtxWasm } = await import("../wasm/evtx_wasm_loader.js");
+    const { EvtxWasmParser } = await loadEvtxWasm();
 
     // Create parser
     const parser = new EvtxWasmParser(data);
@@ -364,10 +362,9 @@ export async function parseBinaryEVTXToEntries(
     const buffer = await file.arrayBuffer();
     const data = new Uint8Array(buffer);
 
-    // Import and initialize WASM module
-    const wasmModule = await import("../wasm/evtx_wasm.js");
-    await wasmModule.default();
-    const { EvtxWasmParser } = wasmModule;
+    // Import and initialize WASM module using Vite-compatible loader
+    const { loadEvtxWasm } = await import("../wasm/evtx_wasm_loader.js");
+    const { EvtxWasmParser } = await loadEvtxWasm();
 
     // Create parser
     const parser = new EvtxWasmParser(data);

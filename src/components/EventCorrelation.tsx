@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { LogEntry, ParsedData } from "../types";
 import { SigmaRuleMatch } from "../lib/sigma/types";
+import { EVENT_TYPE_DESCRIPTIONS } from "../lib/correlationEngine";
 import {
-  correlateEvents,
-  CorrelatedChain,
-  EVENT_TYPE_DESCRIPTIONS,
-} from "../lib/correlationEngine";
+  correlateEventsNative,
+  CorrelatedChainNative,
+  CorrelationResultNative,
+} from "../lib/correlationNativeClient";
+import { CorrelatedChain } from "../lib/correlationEngine";
 import ExportReport from "./ExportReport";
 import "./EventCorrelation.css";
 
@@ -47,135 +49,213 @@ export default function EventCorrelation({
     "chains",
   );
   const [isCorrelating, setIsCorrelating] = useState(true);
-  const [chains, setChains] = useState<CorrelatedChain[]>([]);
+  const [chains, setChains] = useState<CorrelatedChainNative[]>([]);
+  const [analytics, setAnalytics] = useState<
+    null | CorrelationResultNative["analytics"]
+  >(null);
   const [temporalWindow, setTemporalWindow] = useState(30); // seconds
   const [correlationProgress, setCorrelationProgress] = useState({
     current: 0,
-    total: 5,
+    total: 1,
   });
 
   // Run correlation engine asynchronously to avoid blocking UI
+  // Rust-native correlation with progress and analytics
   useEffect(() => {
     let cancelled = false;
 
+    // Listen for progress events from Rust
+    const handler = (event: any) => {
+      if (typeof event?.payload === "number") {
+        setCorrelationProgress((prev) => ({ ...prev, current: event.payload }));
+      }
+    };
+    // @ts-ignore
+    window.__TAURI__?.event?.listen?.("correlation_progress", handler);
+
     const runCorrelation = async () => {
       setIsCorrelating(true);
-      setCorrelationProgress({ current: 0, total: 5 });
-      // Yield to browser to show loading state
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      if (cancelled) return;
+      setCorrelationProgress({ current: 0, total: 1 });
 
-      const result = correlateEvents(
-        entries,
-        sigmaMatches,
-        (current, total) => {
-          if (!cancelled) setCorrelationProgress({ current, total });
-        },
-        { temporalWindowMs: temporalWindow * 1000 },
-      );
-      if (cancelled) return;
-      setChains(result);
-      setIsCorrelating(false);
+      // Convert sigmaMatches Map to array
+      const sigmaMatchesArr = Array.from(sigmaMatches.values()).flat();
+      try {
+        const result = await correlateEventsNative(entries, sigmaMatchesArr);
+        if (!cancelled) {
+          setChains(result.chains);
+          setAnalytics(result.analytics);
+          setCorrelationProgress((prev) => ({ ...prev, current: prev.total }));
+          setIsCorrelating(false);
+        }
+      } catch (err) {
+        setIsCorrelating(false);
+      }
     };
-
     runCorrelation();
     return () => {
       cancelled = true;
+      // @ts-ignore
+      window.__TAURI__?.event?.unlisten?.("correlation_progress", handler);
     };
-  }, [entries, sigmaMatches, temporalWindow]);
+  }, [entries, sigmaMatches]);
+  // Convert CorrelatedChainNative to CorrelatedChain for UI components
+  const allowedSeverities = [
+    "critical",
+    "high",
+    "medium",
+    "low",
+    "info",
+  ] as const;
+  const chainsConverted: CorrelatedChain[] = useMemo(
+    () =>
+      chains.map((c) => ({
+        ...c,
+        events: [], // Native doesn't provide events, so leave empty
+        eventIndices: c.event_indices,
+        relationships: [],
+        startTime: new Date(),
+        endTime: new Date(),
+        duration: 0,
+        involvedProcesses: new Set<string>(),
+        involvedHosts: new Set<string>(),
+        sigmaMatches: [],
+        severity: allowedSeverities.includes(c.severity as any)
+          ? (c.severity as CorrelatedChain["severity"])
+          : "info",
+      })),
+    [chains],
+  );
 
-  // Filter and sort chains
-  const filteredChains = useMemo(() => {
-    let result = chains.filter((c) => c.events.length >= minEvents);
+  // Filtering logic (minEvents, severity)
+  const filteredChains = useMemo(
+    () =>
+      chainsConverted.filter(
+        (c) =>
+          (c.eventIndices?.length ?? 0) >= minEvents &&
+          (severityFilter === "all" || c.severity === severityFilter),
+      ),
+    [chainsConverted, minEvents, severityFilter],
+  );
 
-    if (severityFilter !== "all") {
-      result = result.filter((c) => c.severity === severityFilter);
-    }
-
-    // Sort by score (descending)
-    result.sort((a, b) => b.score - a.score);
-
-    return result;
-  }, [chains, minEvents, severityFilter]);
-
-  const formatDuration = (ms: number): string => {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    if (ms < 3600000) return `${(ms / 60000).toFixed(1)}m`;
-    return `${(ms / 3600000).toFixed(1)}h`;
+  // Format duration helper
+  const formatDuration = (ms: number) => {
+    if (!ms || isNaN(ms)) return "-";
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
   };
 
-  // Statistics
   const stats = useMemo(() => {
-    const totalEvents = chains.reduce((sum, c) => sum + c.events.length, 0);
-    const withMatches = chains.filter((c) => c.sigmaMatches.length > 0).length;
+    const totalEvents = chainsConverted.reduce(
+      (sum, c) => sum + (c.events?.length ?? 0),
+      0,
+    );
+    const withMatches = chainsConverted.filter(
+      (c) => c.sigmaMatches?.length > 0,
+    ).length;
     const bySeverity = {
-      critical: chains.filter((c) => c.severity === "critical").length,
-      high: chains.filter((c) => c.severity === "high").length,
-      medium: chains.filter((c) => c.severity === "medium").length,
-      low: chains.filter((c) => c.severity === "low").length,
-      info: chains.filter((c) => c.severity === "info").length,
+      critical: chainsConverted.filter((c) => c.severity === "critical").length,
+      high: chainsConverted.filter((c) => c.severity === "high").length,
+      medium: chainsConverted.filter((c) => c.severity === "medium").length,
+      low: chainsConverted.filter((c) => c.severity === "low").length,
+      info: chainsConverted.filter((c) => c.severity === "info").length,
     };
-    return { total: chains.length, totalEvents, withMatches, bySeverity };
-  }, [chains]);
+    return {
+      total: chainsConverted.length,
+      totalEvents,
+      withMatches,
+      bySeverity,
+    };
+  }, [chainsConverted]);
 
+  // Show progress bar if correlating
   if (isCorrelating) {
-    // Count events with SIGMA matches
-    const eventsWithMatches = new Set<LogEntry>();
-    for (const matches of sigmaMatches.values()) {
-      for (const match of matches) {
-        if (match.event) {
-          eventsWithMatches.add(match.event);
-        }
-      }
-    }
-
     return (
-      <div className="event-correlation">
-        <div className="correlation-header">
-          <div className="header-left">
-            <button className="back-button" onClick={onBack}>
-              ← Back
-            </button>
-            <div className="header-title">
-              <h1>Event Correlation</h1>
-              <p className="tagline">Analyzing event chains...</p>
-            </div>
-          </div>
+      <div className="correlation-progress modern-progress">
+        <div className="progress-header">
+          <span
+            role="img"
+            aria-label="processing"
+            style={{ fontSize: "2rem", marginRight: 8 }}
+          >
+            🔄
+          </span>
+          <h3 style={{ margin: 0 }}>Correlating Events...</h3>
         </div>
-        <div className="correlation-loading">
-          <div className="loading-spinner"></div>
-          {eventsWithMatches.size === 0 ? (
-            <>
-              <p>No SIGMA matches found</p>
-              <p className="loading-hint">
-                Event Correlation requires SIGMA detections. Please run SIGMA
-                Detection first.
-              </p>
-            </>
-          ) : (
-            <>
-              <p>
-                Correlating {eventsWithMatches.size.toLocaleString()} events
-                with SIGMA matches...
-              </p>
-              <div className="correlation-progress">
-                <span>
-                  {correlationProgress.current} / {correlationProgress.total}
-                </span>
-              </div>
-              <p className="loading-hint">
-                Building event chains and relationships
-              </p>
-            </>
-          )}
+        <div className="progress-bar-outer">
+          <div
+            className="progress-bar-inner"
+            style={{
+              width: `${Math.min(100, (correlationProgress.current / correlationProgress.total) * 100)}%`,
+            }}
+          />
+        </div>
+        <div className="progress-label">
+          Progress: <b>{correlationProgress.current}</b> /{" "}
+          {correlationProgress.total}
+        </div>
+        <div className="progress-tip">
+          This may take a moment for large datasets.
         </div>
       </div>
     );
   }
 
+  // Show analytics summary if available
+  const analyticsSummary = analytics && (
+    <div className="correlation-analytics modern-analytics">
+      <h4 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span role="img" aria-label="analytics">
+          📊
+        </span>{" "}
+        Correlation Analytics
+      </h4>
+      <div className="analytics-cards">
+        <div className="analytics-card" title="Total event chains detected">
+          <span className="analytics-label">Chains</span>
+          <span className="analytics-value chains">
+            {analytics.total_chains}
+          </span>
+        </div>
+        <div
+          className="analytics-card"
+          title="Average number of events per chain"
+        >
+          <span className="analytics-label">Avg. Chain Length</span>
+          <span className="analytics-value avg">
+            {analytics.avg_chain_length.toFixed(2)}
+          </span>
+        </div>
+        <div
+          className="analytics-card"
+          title="Top 5 most frequent process images"
+        >
+          <span className="analytics-label">Top Processes</span>
+          <span className="analytics-value procs">
+            {analytics.top_processes.length ? (
+              analytics.top_processes.join(", ")
+            ) : (
+              <span style={{ color: "#aaa" }}>N/A</span>
+            )}
+          </span>
+        </div>
+        <div
+          className="analytics-card"
+          title="Highest threat score among all chains"
+        >
+          <span className="analytics-label">Max Threat Score</span>
+          <span className="analytics-value score">{analytics.max_score}</span>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="event-correlation">
+      {analyticsSummary}
       <div className="correlation-header">
         <div className="header-left">
           <button className="back-button" onClick={onBack}>
@@ -325,7 +405,7 @@ export default function EventCorrelation({
           </span>
         </div>
         <div className="filter-result">
-          Showing {filteredChains.length} of {chains.length} chains
+          Showing {filteredChains.length} of {chainsConverted.length} chains
         </div>
       </div>
 

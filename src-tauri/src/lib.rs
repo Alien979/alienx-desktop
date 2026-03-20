@@ -1,8 +1,10 @@
+mod folder_accel;
 pub mod excel_accel;
 
 pub mod sigma_accel;
 mod yara_accel;
 pub mod xml_accel;
+mod correlation_engine;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,7 +23,9 @@ pub fn run() {
         yara_accel::scan_yara_native,
         sigma_accel::sigma_prefilter_native,
         excel_accel::parse_csv_file_native,
-        xml_accel::parse_xml_file_native
+        xml_accel::parse_xml_file_native,
+        folder_accel::parse_folder_native,
+        correlation_engine::correlate_events_native
       ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

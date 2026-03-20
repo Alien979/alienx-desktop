@@ -1,7 +1,8 @@
 // Bridge for calling native Rust CSV/TSV parser via Tauri
 // Only used in desktop builds
 
-import { invoke } from "@tauri-apps/api/tauri";
+// @ts-ignore
+import { invoke } from "@tauri-apps/api/core";
 import type { ParsedData } from "../types";
 
 export async function parseCsvFileNative(path: string): Promise<ParsedData> {
