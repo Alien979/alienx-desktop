@@ -9,6 +9,7 @@ import {
 } from "../lib/yara";
 import {
   getCustomYaraRules,
+  isCustomRuleEnabled,
   getStoredYaraStrictness,
   setStoredYaraStrictness,
   YaraStrictness,
@@ -181,7 +182,10 @@ export default function YaraDetections({
     setProgress({ processed: 0, total: 0, matchesFound: 0 });
 
     const performScan = async () => {
-      const activeCustomRules = customRules.filter(
+      const enabledCustomRules = customRules.filter((rule) =>
+        isCustomRuleEnabled(rule.id),
+      );
+      const activeCustomRules = enabledCustomRules.filter(
         (rule) => rule.platform === "all" || rule.platform === platform,
       );
 
@@ -223,7 +227,7 @@ export default function YaraDetections({
           50,
           {
             strictness,
-            customRules,
+            customRules: enabledCustomRules,
           },
         );
 

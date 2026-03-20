@@ -15,6 +15,9 @@ export interface CustomYaraRuleDraft {
 }
 
 const CUSTOM_YARA_RULES_KEY = "alienx_custom_yara_rules_v1";
+// Stores disabled custom rule ids. Any rule id not present defaults to enabled.
+const CUSTOM_YARA_RULES_ENABLED_KEY =
+  "alienx_custom_yara_rules_enabled_v1";
 const YARA_STRICTNESS_KEY = "alienx_yara_strictness_v1";
 
 function slugify(value: string): string {
@@ -23,6 +26,53 @@ function slugify(value: string): string {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 60);
+}
+
+type EnabledRuleMap = Record<string, boolean>;
+
+function readEnabledRuleMap(): EnabledRuleMap {
+  try {
+    const raw = localStorage.getItem(CUSTOM_YARA_RULES_ENABLED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as EnabledRuleMap;
+  } catch {
+    return {};
+  }
+}
+
+function writeEnabledRuleMap(map: EnabledRuleMap): void {
+  localStorage.setItem(CUSTOM_YARA_RULES_ENABLED_KEY, JSON.stringify(map));
+}
+
+/**
+ * Custom rules are enabled by default.
+ * We only persist ids the user disables.
+ */
+export function isCustomRuleEnabled(ruleId: string): boolean {
+  const map = readEnabledRuleMap();
+  if (Object.prototype.hasOwnProperty.call(map, ruleId)) {
+    return Boolean(map[ruleId]);
+  }
+  return true;
+}
+
+export function setCustomRuleEnabled(ruleId: string, enabled: boolean): void {
+  const map = readEnabledRuleMap();
+  if (enabled) {
+    // Remove from disabled-list to keep the storage small.
+    delete map[ruleId];
+  } else {
+    map[ruleId] = false;
+  }
+  writeEnabledRuleMap(map);
+}
+
+export function getCustomRuleEnabledRuleIds(): string[] {
+  const map = readEnabledRuleMap();
+  // Unknown ids => enabled, so we can only return explicitly stored disabled ones.
+  return Object.keys(map).filter((id) => map[id] !== false);
 }
 
 function parseMultiLine(value: string): string[] {
@@ -169,6 +219,17 @@ export function customRuleToDraft(rule: BundledYaraRule): CustomYaraRuleDraft {
 export function deleteCustomYaraRule(ruleId: string): void {
   const next = getCustomYaraRules().filter((rule) => rule.id !== ruleId);
   saveCustomYaraRules(next);
+
+  // Clean up enabled/disabled mapping to avoid stale entries.
+  try {
+    const map = readEnabledRuleMap();
+    if (Object.prototype.hasOwnProperty.call(map, ruleId)) {
+      delete map[ruleId];
+      writeEnabledRuleMap(map);
+    }
+  } catch {
+    // Best effort only.
+  }
 }
 
 export function getStoredYaraStrictness(): YaraStrictness {

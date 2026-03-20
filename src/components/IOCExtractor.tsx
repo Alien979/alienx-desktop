@@ -212,6 +212,53 @@ const FALSE_POSITIVES: Record<IOCType, string[]> = {
   base64: [],
 };
 
+const IOC_DETECTION_PRIORITY: IOCType[] = [
+  "url",
+  "email",
+  "registry",
+  "filepath",
+  "hash",
+  "ip",
+  "domain",
+  "base64",
+];
+
+function detectIOCTypeAndValue(token: string): {
+  type: IOCType;
+  value: string;
+} | null {
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+
+  const tokenLower = trimmed.toLowerCase();
+  for (const type of IOC_DETECTION_PRIORITY) {
+    const pattern = IOC_PATTERNS[type];
+    try {
+      pattern.lastIndex = 0;
+    } catch {
+      // ignore
+    }
+
+    const matches = trimmed.match(pattern);
+    if (!matches || matches.length === 0) continue;
+
+    // Ensure the match is (at least) the full token, not just a substring.
+    const hasExact = matches.some((m) => m.toLowerCase() === tokenLower);
+    if (!hasExact) continue;
+
+    if (FALSE_POSITIVES[type].includes(tokenLower)) continue;
+
+    // Reduce false positives using the same heuristics as extraction.
+    if (type === "ip" && isVersionString(trimmed, trimmed)) continue;
+    if (type === "filepath" && !isValidFilePath(trimmed)) continue;
+    if (type === "base64" && !isLikelyBase64(trimmed)) continue;
+
+    return { type, value: trimmed };
+  }
+
+  return null;
+}
+
 // Common benign paths to optionally filter
 const BENIGN_PATHS = [
   "C:\\Windows\\System32",
@@ -291,6 +338,7 @@ export default function IOCExtractor({
     useState("");
   const [newActorIOCType, setNewActorIOCType] = useState<IOCType>("ip");
   const [newActorIOCValue, setNewActorIOCValue] = useState("");
+  const [newActorBulkIOCText, setNewActorBulkIOCText] = useState("");
   const [newActorIOCNote, setNewActorIOCNote] = useState("");
   const [threatRepoError, setThreatRepoError] = useState<string | null>(null);
   const [feedName, setFeedName] = useState("Imported Feed");
@@ -849,11 +897,99 @@ export default function IOCExtractor({
       return;
     }
 
+    const note = newActorIOCNote.trim();
+    const bulkText = newActorBulkIOCText.trim();
+
+    const pushDetectedItems = (items: Array<{ type: IOCType; value: string }>) => {
+      let added = 0;
+      let duplicates = 0;
+      let invalid = 0;
+
+      // Dedupe by (type,value) after normalization rules inside addThreatActorIOC.
+      const seen = new Set<string>();
+      const uniqueItems: Array<{ type: IOCType; value: string }> = [];
+
+      for (const it of items) {
+        const normalized =
+          it.type === "base64" ? it.value.trim() : it.value.trim().toLowerCase();
+        const key = `${it.type}:${normalized}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueItems.push({ type: it.type, value: it.value.trim() });
+      }
+
+      for (const item of uniqueItems) {
+        const result = addThreatActorIOC(selectedThreatActorId, {
+          type: item.type,
+          value: item.value,
+          note,
+        });
+
+        if (result.ok) added++;
+        else {
+          const msg = result.error.toLowerCase();
+          if (msg.includes("already exists") || msg.includes("duplicate"))
+            duplicates++;
+          else invalid++;
+        }
+      }
+
+      refreshThreatRepo();
+      setThreatRepoError(null);
+
+      if (added === 0 && (duplicates > 0 || invalid > 0)) {
+        setThreatRepoError(
+          invalid > 0
+            ? "Bulk import completed, but no valid IOCs were added."
+            : "Bulk import completed, but all IOCs were duplicates.",
+        );
+      }
+    };
+
+    // Bulk autodetect mode
+    if (bulkText) {
+      const tokens = bulkText
+        .split(/[,\s]+/g)
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      if (tokens.length === 0) {
+        setThreatRepoError("Paste at least one IOC value.");
+        return;
+      }
+
+      const detected: Array<{ type: IOCType; value: string }> = [];
+      for (const token of tokens) {
+        const d = detectIOCTypeAndValue(token);
+        if (!d) continue;
+        detected.push(d);
+      }
+
+      if (detected.length === 0) {
+        setThreatRepoError(
+          "No IOC values detected. Ensure values are separated by commas/spaces/new lines.",
+        );
+        return;
+      }
+
+      pushDetectedItems(detected);
+      setNewActorBulkIOCText("");
+      setNewActorIOCNote("");
+      return;
+    }
+
+    // Fixed-type single IOC fallback (backwards compatible)
+    if (!newActorIOCValue.trim()) {
+      setThreatRepoError("IOC value is required.");
+      return;
+    }
+
     const result = addThreatActorIOC(selectedThreatActorId, {
       type: newActorIOCType,
       value: newActorIOCValue,
-      note: newActorIOCNote,
+      note,
     });
+
     if (!result.ok) {
       setThreatRepoError(result.error);
       return;
@@ -864,6 +1000,7 @@ export default function IOCExtractor({
     setNewActorIOCNote("");
     refreshThreatRepo();
   }, [
+    newActorBulkIOCText,
     newActorIOCNote,
     newActorIOCType,
     newActorIOCValue,
@@ -1222,6 +1359,27 @@ export default function IOCExtractor({
                 onChange={(e) => setNewActorIOCValue(e.target.value)}
               />
             </div>
+            <textarea
+              value={newActorBulkIOCText}
+              onChange={(e) => setNewActorBulkIOCText(e.target.value)}
+              placeholder="Bulk paste IOCs here (auto-detect type). Separate by commas, spaces, or new lines. Example: 1.2.3.4, bad.com, https://evil.com/a"
+              rows={3}
+              style={{
+                marginTop: 8,
+                width: "100%",
+                background: "var(--bg-hover)",
+                border: "1px solid var(--border-primary)",
+                color: "var(--text-primary)",
+                borderRadius: 8,
+                padding: "0.5rem",
+                boxSizing: "border-box",
+                resize: "vertical",
+              }}
+            />
+            <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: "6px 0 0" }}>
+              If bulk text is filled, values above (fixed type) are ignored.
+              The note applies to every added IOC.
+            </p>
             <input
               className="threat-input"
               placeholder="IOC note (optional)"

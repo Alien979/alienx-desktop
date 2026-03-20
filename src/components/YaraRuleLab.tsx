@@ -7,6 +7,8 @@ import {
   CustomYaraRuleDraft,
   deleteCustomYaraRule,
   getCustomYaraRules,
+  isCustomRuleEnabled,
+  setCustomRuleEnabled,
   updateCustomYaraRule,
 } from "../lib/customYaraRules";
 import "./Dashboard.css";
@@ -20,6 +22,7 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
   const [customRules, setCustomRules] = useState<BundledYaraRule[]>(() =>
     getCustomYaraRules(),
   );
+  const [, setEnabledRevision] = useState(0);
   const [customRuleError, setCustomRuleError] = useState<string | null>(null);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [bundledRuleCount, setBundledRuleCount] = useState<number | null>(null);
@@ -323,7 +326,29 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
                     {rule.platform}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: "0.78rem",
+                      color: "var(--text-muted)",
+                      userSelect: "none",
+                      cursor: "pointer",
+                    }}
+                    title="Include this rule in YARA analysis scans"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isCustomRuleEnabled(rule.id)}
+                      onChange={(e) => {
+                        setCustomRuleEnabled(rule.id, e.target.checked);
+                        setEnabledRevision((r) => r + 1);
+                      }}
+                    />
+                    Include
+                  </label>
                   <button
                     className="timeline-button"
                     onClick={() => handleEditCustomRule(rule)}
