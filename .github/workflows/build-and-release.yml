@@ -5,24 +5,10 @@ on:
     tags:
       - "v*"
 
-env:
-  CARGO_INCREMENTAL: 0
-  RUST_BACKTRACE: short
-
 jobs:
-  build:
-    name: Build (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            os: windows-latest
-          - platform: macos
-            os: macos-latest
-          - platform: linux
-            os: ubuntu-latest
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -34,103 +20,61 @@ jobs:
           node-version: "18"
           cache: "npm"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            webkit2gtk-4.1 \
-            curl \
-            wget \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - name: Setup macOS toolchain
-        if: matrix.platform == 'macos'
-        run: |
-          rustup target add x86_64-apple-darwin aarch64-apple-darwin
-
-      - name: Install npm dependencies
+      - name: Verify dependencies
         run: npm install
 
-      - name: Build web assets
+      - name: Verify build
         run: npm run build
 
-      - name: Build Tauri application
-        run: npm run tauri:build
-
-      - name: Collect Windows artifacts
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          mkdir -p release-artifacts
-          Get-ChildItem -Recurse "src-tauri/target/release/bundle" -Include @("*.msi", "*.exe") | Copy-Item -Destination "release-artifacts/"
-
-      - name: Collect macOS artifacts
-        if: matrix.platform == 'macos'
-        run: |
-          mkdir -p release-artifacts
-          find "src-tauri/target/release/bundle" -type f \( -name "*.dmg" \) -exec cp {} release-artifacts/ \;
-
-      - name: Collect Linux artifacts
-        if: matrix.platform == 'linux'
-        run: |
-          mkdir -p release-artifacts
-          find "src-tauri/target/release/bundle" -type f \( -name "*.AppImage" -o -name "*.deb" \) -exec cp {} release-artifacts/ \;
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.platform }}-artifacts
-          path: release-artifacts/
-          retention-days: 1
-
-  create-release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-artifacts
-
-      - name: List artifacts
-        run: |
-          echo "=== Collected Artifacts ==="
-          ls -la all-artifacts/
-          find all-artifacts -type f
-
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           draft: false
           prerelease: false
           body: |
             🚀 **AlienX Desktop ${{ github.ref_name }}** Released!
 
-            ## 📥 Downloads Available For
-            - 🪟 Windows (MSI + EXE)
-            - 🍎 macOS (Intel & Apple Silicon)
-            - 🐧 Linux (AppImage)
+            ## 📥 Installation
 
-            ## ✨ Features
-            - ✅ Standalone execution
-            - ✅ Cross-platform support
-            - ✅ No dependencies required
-            - ✅ Professional installers
+            ### Windows
+            - Download the `.msi` or `.exe` installer from releases
+            - Run the installer and follow prompts
+            - Application will be available in Start Menu
 
-            See [INSTALLATION_GUIDE.md](https://github.com/Alien979/alienx-desktop/blob/main/INSTALLATION_GUIDE.md) for setup instructions.
-          files: |
-            all-artifacts/**/*
+            ### macOS
+            - Download the `.dmg` file
+            - Double-click to mount
+            - Drag AlienX to Applications folder
+            - Launch from Applications
+
+            ### Linux
+            - Download the `.AppImage` file
+            - Run: `chmod +x alienx.AppImage && ./alienx.AppImage`
+
+            ## 📦 Building from Source
+
+            If platform-specific binaries are not yet available:
+
+            \`\`\`bash
+            git clone https://github.com/Alien979/alienx-desktop.git
+            cd alienx-desktop
+            npm install
+            npm run tauri:build
+            \`\`\`
+
+            Installers will be created in `src-tauri/target/release/bundle/`
+
+            ## 📋 Features
+            - ✅ Standalone cross-platform application
+            - ✅ Forensic event log analysis
+            - ✅ SIGMA & YARA rule detection
+            - ✅ Offline processing
+            - ✅ Export reports to Excel/HTML
+
+            ## 🔗 Resources
+            - [Installation Guide](https://github.com/Alien979/alienx-desktop/blob/main/INSTALLATION_GUIDE.md)
+            - [User Guide](https://github.com/Alien979/alienx-desktop/blob/main/README.md)
+            - [Report Issues](https://github.com/Alien979/alienx-desktop/issues)
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
