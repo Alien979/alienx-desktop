@@ -52,10 +52,14 @@ export const MitreHeatmap: React.FC<MitreHeatmapProps> = ({ tags }) => {
     };
   }, [tags]);
 
-  const maxCount = Math.max(1, ...Object.values(tacticCounts));
+  // Safely compute max count, filtering out non-numeric values
+  const numericCounts = Object.values(tacticCounts).filter(
+    (v) => typeof v === "number" && isFinite(v),
+  );
+  const maxCount = numericCounts.length > 0 ? Math.max(1, ...numericCounts) : 1;
 
   const getColor = (count: number): string => {
-    if (count === 0) return "rgba(255,255,255,0.03)";
+    if (count === 0 || !isFinite(count)) return "rgba(255,255,255,0.03)";
     const ratio = count / maxCount;
     if (ratio > 0.7) return "rgba(239,68,68,0.7)";
     if (ratio > 0.4) return "rgba(249,115,22,0.55)";

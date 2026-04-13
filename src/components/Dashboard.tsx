@@ -5,6 +5,7 @@ import YaraDetections from "./YaraDetections";
 import { SigmaEngine } from "../lib/sigma";
 import { SigmaRuleMatch } from "../lib/sigma/types";
 import type { YaraRuleMatch, YaraScanStats } from "../lib/yara";
+import { extractUnique } from "../lib/utils/setUtils";
 import "./Dashboard.css";
 
 interface DashboardProps {
@@ -72,12 +73,11 @@ export default function Dashboard({
         ? new Date(timestamps[timestamps.length - 1])
         : null;
 
-    const computers = new Set(
-      entries
-        .map((e) => e.computer || e.host || e.eventData?.Computer || "")
-        .filter(Boolean),
+    const computers = extractUnique(
+      entries,
+      (e) => e.computer || e.host || e.eventData?.Computer || null,
     );
-    const eventIds = new Set(entries.map((e) => e.eventId).filter(Boolean));
+    const eventIds = extractUnique(entries, (e) => e.eventId);
     const fileCount = data.sourceFiles?.length ?? 1;
 
     // Detection breakdown from cached matches

@@ -101,7 +101,7 @@ export default function LLMAnalysis({
         lastUpdated: Date.now(),
       });
     }
-  }, [conversationHistory]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [conversationHistory, provider, model]);
 
   useEffect(() => {
     let cancelled = false;
@@ -171,7 +171,7 @@ export default function LLMAnalysis({
         }
       }
     }
-  }, [provider, configChangeCounter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [provider, configChangeCounter]);
 
   const handleAnalyze = async () => {
     const meta = getProviderMetadata(provider);

@@ -362,6 +362,7 @@ function matchIPv4CIDR(ip: string, cidr: string): boolean {
     // Check if IP is in network range
     return (ipInt & mask) === (networkInt & mask);
   } catch (e) {
+    console.error("[matchIPv4CIDR] Error parsing IPv4 CIDR:", { ip, cidr }, e);
     return false;
   }
 }
@@ -385,6 +386,7 @@ function ipv4ToInt(ip: string): number | null {
       ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0
     );
   } catch (e) {
+    console.error("[ipv4ToInt] Error converting IPv4 to integer:", ip, e);
     return null;
   }
 }
@@ -434,6 +436,7 @@ function matchIPv6CIDR(ip: string, cidr: string): boolean {
 
     return true;
   } catch (e) {
+    console.error("[matchIPv6CIDR] Error parsing IPv6 CIDR:", { ip, cidr }, e);
     return false;
   }
 }
@@ -500,6 +503,7 @@ function expandIPv6(ip: string): string | null {
     // Pad each segment to 4 hex digits
     return segments.map((s) => s.padStart(4, "0")).join(":");
   } catch (e) {
+    console.error("[expandIPv6] Error expanding IPv6 address:", ip, e);
     return null;
   }
 }
@@ -515,8 +519,20 @@ function ipv6ToSegments(expandedIp: string): number[] | null {
       return null;
     }
 
-    return segments.map((s) => parseInt(s, 16));
+    return segments.map((s) => {
+      const num = parseInt(s, 16);
+      if (isNaN(num)) {
+        console.warn("[ipv6ToSegments] Invalid hex segment:", s);
+        return 0;
+      }
+      return num;
+    });
   } catch (e) {
+    console.error(
+      "[ipv6ToSegments] Error parsing IPv6 segments:",
+      expandedIp,
+      e,
+    );
     return null;
   }
 }

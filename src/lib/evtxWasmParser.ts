@@ -68,10 +68,11 @@ function mapToObject(input: any): any {
 // Safely coerce a value to a positive finite number
 const toSafeNumber = (val: any): number => {
   if (typeof val === "number" && isFinite(val) && val > 0) return val;
-  if (typeof val === "string") {
+  if (typeof val === "string" && val.trim().length > 0) {
     const num = parseInt(val, 10);
-    return isFinite(num) && num > 0 ? num : 0;
+    if (!isNaN(num) && isFinite(num) && num > 0) return num;
   }
+  console.warn("[toSafeNumber] Invalid input, returning default 0:", val);
   return 0;
 };
 

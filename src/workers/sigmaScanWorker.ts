@@ -1,13 +1,12 @@
 // sigmaScanWorker.ts - ES module Web Worker for async Sigma detection with progress/cancel
 import { matchRules } from "../lib/sigma/engine/matcher";
 
-// @ts-ignore: variable is kept for future use
-let running = false;
+let cancelled = false;
 
 self.onmessage = async (e) => {
   const { type, payload } = e.data;
   if (type === "start") {
-    running = true;
+    cancelled = false;
     const { entries, rules } = payload;
     let matchesMap = new Map();
     let matchesFound = 0;
@@ -16,7 +15,7 @@ self.onmessage = async (e) => {
       const total = entries.length;
       matchesMap = new Map();
       for (let i = 0; i < entries.length; i++) {
-        if (!running) break;
+        if (cancelled) break;
         const event = entries[i];
         const matches = matchRules(event, rules);
         for (const match of matches) {
@@ -46,6 +45,6 @@ self.onmessage = async (e) => {
     const matches = Object.fromEntries(matchesMap);
     self.postMessage({ type: "done", matches });
   } else if (type === "cancel") {
-    running = false;
+    cancelled = true;
   }
 };

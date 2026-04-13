@@ -21,6 +21,7 @@ import {
 } from "../lib/processNetworkMap";
 import { ProcessSearch } from "./ProcessSearch";
 import { ProcessTimeline } from "./ProcessTimeline";
+import { extractUnique } from "../lib/utils/setUtils";
 import "./ProcessExecutionDashboard.css";
 
 interface ProcessExecutionDashboardProps {
@@ -590,7 +591,7 @@ export default function ProcessExecutionDashboard({
         </div>
         <div className="stat-card">
           <span className="stat-value">
-            {new Set(processEvents.map((p) => p.user).filter(Boolean)).size}
+            {extractUnique(processEvents, (p) => p.user).size}
           </span>
           <span className="stat-label">Active Users</span>
         </div>

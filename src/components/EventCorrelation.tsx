@@ -63,15 +63,28 @@ export default function EventCorrelation({
   // Rust-native correlation with progress and analytics
   useEffect(() => {
     let cancelled = false;
+    let unlistenFn: (() => void) | null = null;
 
-    // Listen for progress events from Rust
-    const handler = (event: any) => {
-      if (typeof event?.payload === "number") {
-        setCorrelationProgress((prev) => ({ ...prev, current: event.payload }));
+    const attachListener = async () => {
+      try {
+        const unlisten = await (window as any).__TAURI__?.event?.listen?.(
+          "correlation_progress",
+          (event: any) => {
+            if (typeof event?.payload === "number" && !cancelled) {
+              setCorrelationProgress((prev) => ({
+                ...prev,
+                current: event.payload,
+              }));
+            }
+          },
+        );
+        if (!cancelled && unlisten) {
+          unlistenFn = unlisten;
+        }
+      } catch (err) {
+        console.error("Failed to attach correlation progress listener:", err);
       }
     };
-    // @ts-ignore
-    window.__TAURI__?.event?.listen?.("correlation_progress", handler);
 
     const runCorrelation = async () => {
       setIsCorrelating(true);
@@ -88,14 +101,18 @@ export default function EventCorrelation({
           setIsCorrelating(false);
         }
       } catch (err) {
-        setIsCorrelating(false);
+        if (!cancelled) setIsCorrelating(false);
       }
     };
+
+    attachListener();
     runCorrelation();
+
     return () => {
       cancelled = true;
-      // @ts-ignore
-      window.__TAURI__?.event?.unlisten?.("correlation_progress", handler);
+      if (unlistenFn) {
+        unlistenFn();
+      }
     };
   }, [entries, sigmaMatches]);
   // Convert CorrelatedChainNative to CorrelatedChain for UI components
@@ -372,7 +389,13 @@ export default function EventCorrelation({
             min={2}
             max={50}
             value={minEvents}
-            onChange={(e) => setMinEvents(parseInt(e.target.value) || 3)}
+            onChange={(e) => {
+              const parsed = parseInt(e.target.value, 10);
+              const value = isNaN(parsed)
+                ? 3
+                : Math.max(2, Math.min(50, parsed));
+              setMinEvents(value);
+            }}
           />
         </div>
         <div className="filter-group">
@@ -397,7 +420,13 @@ export default function EventCorrelation({
             max={120}
             step={5}
             value={temporalWindow}
-            onChange={(e) => setTemporalWindow(parseInt(e.target.value) || 0)}
+            onChange={(e) => {
+              const parsed = parseInt(e.target.value, 10);
+              const value = isNaN(parsed)
+                ? 0
+                : Math.max(0, Math.min(120, parsed));
+              setTemporalWindow(value);
+            }}
             style={{ width: 100 }}
           />
           <span style={{ fontSize: "0.8rem", color: "#aaa", marginLeft: 4 }}>

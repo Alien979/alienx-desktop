@@ -1,0 +1,167 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "windows"
+            os: windows-latest
+            args: "--target x86_64-pc-windows-msvc"
+            artifact_name: "alienx.exe"
+            artifact_path: "src-tauri/target/x86_64-pc-windows-msvc/release/alienx.exe"
+
+          - platform: "macos"
+            os: macos-latest
+            args: "--target x86_64-apple-darwin"
+            artifact_name: "alienx"
+            artifact_path: "src-tauri/target/x86_64-apple-darwin/release/alienx"
+
+          - platform: "macos-aarch64"
+            os: macos-latest
+            args: "--target aarch64-apple-darwin"
+            artifact_name: "alienx"
+            artifact_path: "src-tauri/target/aarch64-apple-darwin/release/alienx"
+
+          - platform: "linux"
+            os: ubuntu-latest
+            args: "--target x86_64-unknown-linux-gnu"
+            artifact_name: "alienx"
+            artifact_path: "src-tauri/target/x86_64-unknown-linux-gnu/release/alienx"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: node-setup/setup-node@v3
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            webkit2gtk-4.1 \
+            curl \
+            wget \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install macOS dependencies
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "AlienX Desktop ${{ github.ref_name }}"
+          releaseBody: |
+            🚀 **AlienX Desktop ${{ github.ref_name }}** has been released!
+
+            ## Supported Platforms
+            - 🪟 Windows 10/11 (x64)
+            - 🍎 macOS 10.13+ (Intel & Apple Silicon)
+            - 🐧 Linux (Ubuntu 20.04+, Fedora, Debian)
+
+            ## Download & Install
+            See [INSTALLATION_GUIDE.md](https://github.com/Alien979/alienx-desktop/blob/main/INSTALLATION_GUIDE.md)
+
+            ## Release Notes
+            See [CHANGELOG.md](https://github.com/Alien979/alienx-desktop/blob/main/CHANGELOG.md)
+
+            ## What's Included
+            - ✅ Standalone application (no dependencies)
+            - ✅ Cross-platform support
+            - ✅ Offline analysis
+            - ✅ Professional installers
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Organize artifacts
+        if: always()
+        run: |
+          mkdir -p release-artifacts/${{ matrix.platform }}
+          find src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" \) -exec cp {} release-artifacts/${{ matrix.platform }}/ \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: ${{ matrix.platform }}-artifacts
+          path: release-artifacts/${{ matrix.platform }}/
+
+  create-release-summary:
+    name: Create Release Summary
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: all-artifacts
+
+      - name: Generate release summary
+        run: |
+          echo "## 📦 AlienX Desktop Release Summary" >> RELEASE_SUMMARY.md
+          echo "" >> RELEASE_SUMMARY.md
+          echo "**Version**: ${{ github.ref_name }}" >> RELEASE_SUMMARY.md
+          echo "**Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> RELEASE_SUMMARY.md
+          echo "" >> RELEASE_SUMMARY.md
+          echo "### 📥 Downloads" >> RELEASE_SUMMARY.md
+          echo "" >> RELEASE_SUMMARY.md
+
+          for dir in all-artifacts/*/; do
+            platform=$(basename "$dir")
+            echo "#### $platform" >> RELEASE_SUMMARY.md
+            if [ -d "$dir" ]; then
+              for file in "$dir"*; do
+                if [ -f "$file" ]; then
+                  filename=$(basename "$file")
+                  size=$(du -h "$file" | cut -f1)
+                  echo "- \`$filename\` ($size)" >> RELEASE_SUMMARY.md
+                fi
+              done
+            fi
+            echo "" >> RELEASE_SUMMARY.md
+          done
+
+      - name: Upload release summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-summary
+          path: RELEASE_SUMMARY.md

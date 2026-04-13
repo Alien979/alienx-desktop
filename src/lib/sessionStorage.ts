@@ -236,7 +236,8 @@ export function deleteSession(id: string): boolean {
     const sessions = getSessionsList().filter((s) => s.id !== id);
     localStorage.setItem(SESSIONS_INDEX_KEY, JSON.stringify(sessions));
     return true;
-  } catch {
+  } catch (error) {
+    console.error("[sessionStorage] Failed to delete session:", id, error);
     return false;
   }
 }
@@ -258,7 +259,8 @@ export function renameSession(id: string, newName: string): boolean {
     }
 
     return true;
-  } catch {
+  } catch (error) {
+    console.error("[sessionStorage] Failed to rename session:", id, error);
     return false;
   }
 }

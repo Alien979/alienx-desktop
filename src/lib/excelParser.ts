@@ -328,13 +328,12 @@ function detectFormatAndPlatform(headers: string[]): {
 
 function mapRowToLogEntry(args: {
   row: Record<string, unknown>;
-  headers: string[];
   fieldMap: Record<string, EntryField>;
   platform: LogPlatform;
   sourceFile: string;
   compactMode: boolean;
 }): LogEntry {
-  const { row, headers, fieldMap, platform, sourceFile, compactMode } = args;
+  const { row, fieldMap, platform, sourceFile, compactMode } = args;
 
   const entry: LogEntry = {
     timestamp: new Date(0),
@@ -429,21 +428,36 @@ function mapRowToLogEntry(args: {
   }
 
   const rawFragments: string[] = [];
-  if (compactMode) {
-    for (const header of headers) {
-      const field = fieldMap[header];
-      if (field === "eventData") continue;
-      const value = row[header];
-      if (value === undefined || value === null || value === "") continue;
-      rawFragments.push(`${header}=${trimForMemory(String(value), 512)}`);
-    }
-  } else {
-    for (const header of headers) {
-      const value = row[header];
-      if (value === undefined || value === null || value === "") continue;
-      rawFragments.push(`${header}=${String(value)}`);
+
+  // Include mapped fields first (more structured)
+  if (entry.message) rawFragments.push(entry.message);
+  if (entry.ip && entry.ip !== "") rawFragments.push(entry.ip);
+  if (entry.computer && entry.computer !== "")
+    rawFragments.push(entry.computer);
+  if (entry.source && entry.source !== "") rawFragments.push(entry.source);
+  if (entry.user && entry.user !== "") rawFragments.push(entry.user);
+  if (entry.processName && entry.processName !== "")
+    rawFragments.push(entry.processName);
+  if (entry.processCmd && entry.processCmd !== "")
+    rawFragments.push(entry.processCmd);
+  if (entry.path && entry.path !== "") rawFragments.push(entry.path);
+
+  // Add eventData fields for better searchability (especially for Excel/CSV)
+  if (entry.eventData && Object.keys(entry.eventData).length > 0) {
+    const eventDataValues = Object.entries(entry.eventData);
+    for (let i = 0; i < eventDataValues.length; i++) {
+      if (compactMode && i >= 20) break; // Limit eventData fields in compact mode
+      const [key, value] = eventDataValues[i];
+      if (value) {
+        rawFragments.push(
+          compactMode
+            ? `${key}=${trimForMemory(String(value), 256)}`
+            : `${key}=${String(value)}`,
+        );
+      }
     }
   }
+
   entry.rawLine = trimForMemory(
     rawFragments.join(" | "),
     compactMode ? 2048 : 8192,
@@ -501,7 +515,6 @@ async function parseDelimitedFileStream(
           entries.push(
             mapRowToLogEntry({
               row,
-              headers,
               fieldMap,
               platform,
               sourceFile: file.name,
@@ -621,7 +634,6 @@ export async function parseExcelFile(
     entries.push(
       mapRowToLogEntry({
         row,
-        headers,
         fieldMap,
         platform,
         sourceFile: file.name,

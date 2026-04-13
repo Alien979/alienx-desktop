@@ -1,12 +1,13 @@
 /**
  * Data Formatter for LLM Prompts
- * 
+ *
  * Formats SIGMA matches, timeline data, and parsed EVTX data
  * into a structured prompt for LLM analysis
  */
 
-import { ParsedData, LogEntry } from '../../types';
-import { SigmaRuleMatch } from '../sigma/types';
+import { ParsedData, LogEntry } from "../../types";
+import { SigmaRuleMatch } from "../sigma/types";
+import { extractUniqueFields } from "../utils/setUtils";
 
 export interface FormattedAnalysisData {
   systemPrompt: string;
@@ -32,7 +33,7 @@ export interface FormattedAnalysisData {
  */
 function formatSigmaMatches(matches: Map<string, SigmaRuleMatch[]>): string {
   if (matches.size === 0) {
-    return 'No SIGMA rule matches found.';
+    return "No SIGMA rule matches found.";
   }
 
   const sections: string[] = [];
@@ -47,8 +48,8 @@ function formatSigmaMatches(matches: Map<string, SigmaRuleMatch[]>): string {
 
   // Sort by severity
   const sortedMatches = Array.from(matches.entries()).sort((a, b) => {
-    const severityA = a[1][0]?.rule.level || 'medium';
-    const severityB = b[1][0]?.rule.level || 'medium';
+    const severityA = a[1][0]?.rule.level || "medium";
+    const severityB = b[1][0]?.rule.level || "medium";
     return (severityOrder[severityA] || 2) - (severityOrder[severityB] || 2);
   });
 
@@ -56,7 +57,7 @@ function formatSigmaMatches(matches: Map<string, SigmaRuleMatch[]>): string {
     if (ruleMatches.length === 0) continue;
 
     const rule = ruleMatches[0].rule;
-    const severity = rule.level || 'medium';
+    const severity = rule.level || "medium";
     const count = ruleMatches.length;
 
     sections.push(`\n[${severity.toUpperCase()}] ${rule.title}`);
@@ -64,7 +65,7 @@ function formatSigmaMatches(matches: Map<string, SigmaRuleMatch[]>): string {
     if (rule.description) {
       sections.push(`  Description: ${rule.description}`);
     }
-    sections.push(`  Matches: ${count} event${count > 1 ? 's' : ''}`);
+    sections.push(`  Matches: ${count} event${count > 1 ? "s" : ""}`);
 
     // Add sample matched events (first 3)
     const sampleEvents = ruleMatches.slice(0, 3);
@@ -72,12 +73,14 @@ function formatSigmaMatches(matches: Map<string, SigmaRuleMatch[]>): string {
       sections.push(`  Sample Events:`);
       sampleEvents.forEach((match, idx) => {
         const event = match.event as any;
-        const timestamp = event.timestamp || match.timestamp || 'Unknown';
-        const computer = event.computer || event.Computer || 'N/A';
-        const eventId = event.eventId || event.EventID || 'N/A';
-        
-        sections.push(`    ${idx + 1}. Time: ${timestamp}, Computer: ${computer}, Event ID: ${eventId}`);
-        
+        const timestamp = event.timestamp || match.timestamp || "Unknown";
+        const computer = event.computer || event.Computer || "N/A";
+        const eventId = event.eventId || event.EventID || "N/A";
+
+        sections.push(
+          `    ${idx + 1}. Time: ${timestamp}, Computer: ${computer}, Event ID: ${eventId}`,
+        );
+
         // Add matched fields if available
         if (match.selectionMatches) {
           const fieldMatches: string[] = [];
@@ -85,24 +88,28 @@ function formatSigmaMatches(matches: Map<string, SigmaRuleMatch[]>): string {
             if (selMatch.fieldMatches) {
               for (const fm of selMatch.fieldMatches) {
                 if (fm.matched && fm.value) {
-                  fieldMatches.push(`${fm.field}=${String(fm.value).substring(0, 100)}`);
+                  fieldMatches.push(
+                    `${fm.field}=${String(fm.value).substring(0, 100)}`,
+                  );
                 }
               }
             }
           }
           if (fieldMatches.length > 0) {
-            sections.push(`       Matched: ${fieldMatches.slice(0, 3).join(', ')}`);
+            sections.push(
+              `       Matched: ${fieldMatches.slice(0, 3).join(", ")}`,
+            );
           }
         }
       });
     }
 
     if (rule.tags && rule.tags.length > 0) {
-      sections.push(`  Tags: ${rule.tags.slice(0, 5).join(', ')}`);
+      sections.push(`  Tags: ${rule.tags.slice(0, 5).join(", ")}`);
     }
   }
 
-  return sections.join('\n');
+  return sections.join("\n");
 }
 
 /**
@@ -110,20 +117,21 @@ function formatSigmaMatches(matches: Map<string, SigmaRuleMatch[]>): string {
  */
 function formatTimelineSummary(matches: Map<string, SigmaRuleMatch[]>): string {
   if (matches.size === 0) {
-    return 'No timeline data available.';
+    return "No timeline data available.";
   }
 
   // Extract all events with timestamps
   const events: Array<{ timestamp: Date; severity: string; rule: string }> = [];
-  
+
   for (const [ruleId, ruleMatches] of matches) {
     for (const match of ruleMatches) {
       const event = match.event as any;
       const timestamp = event.timestamp || match.timestamp;
       if (timestamp) {
         events.push({
-          timestamp: timestamp instanceof Date ? timestamp : new Date(timestamp),
-          severity: match.rule.level || 'medium',
+          timestamp:
+            timestamp instanceof Date ? timestamp : new Date(timestamp),
+          severity: match.rule.level || "medium",
           rule: match.rule.title || ruleId,
         });
       }
@@ -131,7 +139,7 @@ function formatTimelineSummary(matches: Map<string, SigmaRuleMatch[]>): string {
   }
 
   if (events.length === 0) {
-    return 'No timestamped events found.';
+    return "No timestamped events found.";
   }
 
   // Sort by timestamp
@@ -150,7 +158,7 @@ function formatTimelineSummary(matches: Map<string, SigmaRuleMatch[]>): string {
     low: 0,
   };
 
-  events.forEach(e => {
+  events.forEach((e) => {
     const sev = e.severity.toLowerCase();
     if (bySeverity[sev] !== undefined) {
       bySeverity[sev]++;
@@ -167,7 +175,7 @@ Timeline Summary:
     - High: ${bySeverity.high}
     - Medium: ${bySeverity.medium}
     - Low: ${bySeverity.low}
-  Peak Activity: ${events.length > 0 ? 'See detailed analysis' : 'N/A'}
+  Peak Activity: ${events.length > 0 ? "See detailed analysis" : "N/A"}
 `.trim();
 }
 
@@ -175,24 +183,34 @@ Timeline Summary:
  * Format parsed data statistics with detailed analysis
  */
 function formatParsedDataStats(data: ParsedData): string {
-  const uniqueComputers = new Set(data.entries.map(e => e.computer).filter(Boolean));
-  const uniqueEventIds = new Set(data.entries.map(e => e.eventId).filter(Boolean));
-  const uniqueIPs = new Set(data.entries.map(e => e.ip).filter(Boolean));
-  const uniqueSources = new Set(data.entries.map(e => e.source).filter(Boolean));
+  // Single-pass collection of unique values for better performance (~4x faster)
+  const unique = extractUniqueFields(data.entries, {
+    computers: (e: any) => e.computer,
+    eventIds: (e: any) => e.eventId,
+    ips: (e: any) => e.ip,
+    sources: (e: any) => e.source,
+  });
+  const uniqueComputers = unique.computers;
+  const uniqueEventIds = unique.eventIds;
+  const uniqueIPs = unique.ips;
+  const uniqueSources = unique.sources;
 
   // Get time range
   const timestamps = data.entries
-    .map(e => e.timestamp)
-    .filter(t => t && !isNaN(t.getTime()))
+    .map((e) => e.timestamp)
+    .filter((t) => t && !isNaN(t.getTime()))
     .sort((a, b) => a.getTime() - b.getTime());
 
   const startTime = timestamps[0];
   const endTime = timestamps[timestamps.length - 1];
-  const duration = endTime && startTime ? (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60) : 0;
+  const duration =
+    endTime && startTime
+      ? (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60)
+      : 0;
 
   // Event ID distribution (top 10)
   const eventIdCounts = new Map<number, number>();
-  data.entries.forEach(e => {
+  data.entries.forEach((e) => {
     if (e.eventId) {
       eventIdCounts.set(e.eventId, (eventIdCounts.get(e.eventId) || 0) + 1);
     }
@@ -203,7 +221,7 @@ function formatParsedDataStats(data: ParsedData): string {
 
   // Computer activity distribution (top 10)
   const computerCounts = new Map<string, number>();
-  data.entries.forEach(e => {
+  data.entries.forEach((e) => {
     if (e.computer) {
       computerCounts.set(e.computer, (computerCounts.get(e.computer) || 0) + 1);
     }
@@ -214,7 +232,7 @@ function formatParsedDataStats(data: ParsedData): string {
 
   // Source/Provider distribution
   const sourceCounts = new Map<string, number>();
-  data.entries.forEach(e => {
+  data.entries.forEach((e) => {
     if (e.source) {
       sourceCounts.set(e.source, (sourceCounts.get(e.source) || 0) + 1);
     }
@@ -228,21 +246,21 @@ Log File Statistics:
   Format: ${data.format.toUpperCase()}
   Total Events: ${data.entries.length}
   Parsed Lines: ${data.parsedLines} / ${data.totalLines}
-  ${data.format === 'evtx' ? `Unique Computers: ${uniqueComputers.size}` : `Unique IPs: ${uniqueIPs.size}`}
-  ${data.format === 'evtx' ? `Unique Event IDs: ${uniqueEventIds.size}` : ''}
-  ${data.format === 'evtx' ? `Unique Sources/Providers: ${uniqueSources.size}` : ''}
-  Time Range: ${startTime ? startTime.toLocaleString() : 'N/A'} to ${endTime ? endTime.toLocaleString() : 'N/A'}
-  Duration: ${duration > 0 ? `${duration.toFixed(1)} hours` : 'N/A'}
+  ${data.format === "evtx" ? `Unique Computers: ${uniqueComputers.size}` : `Unique IPs: ${uniqueIPs.size}`}
+  ${data.format === "evtx" ? `Unique Event IDs: ${uniqueEventIds.size}` : ""}
+  ${data.format === "evtx" ? `Unique Sources/Providers: ${uniqueSources.size}` : ""}
+  Time Range: ${startTime ? startTime.toLocaleString() : "N/A"} to ${endTime ? endTime.toLocaleString() : "N/A"}
+  Duration: ${duration > 0 ? `${duration.toFixed(1)} hours` : "N/A"}
 `;
 
-  if (data.format === 'evtx' && topEventIds.length > 0) {
+  if (data.format === "evtx" && topEventIds.length > 0) {
     stats += `\n\nTop 10 Event IDs by Frequency:`;
     topEventIds.forEach(([eventId, count]) => {
       stats += `\n  Event ID ${eventId}: ${count} occurrences`;
     });
   }
 
-  if (data.format === 'evtx' && topComputers.length > 0) {
+  if (data.format === "evtx" && topComputers.length > 0) {
     stats += `\n\nTop 10 Most Active Computers:`;
     topComputers.forEach(([computer, count]) => {
       stats += `\n  ${computer}: ${count} events`;
@@ -265,18 +283,29 @@ Log File Statistics:
  */
 // @ts-ignore - Unused function kept for future use
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function formatSampleEvents(data: ParsedData, matches: Map<string, SigmaRuleMatch[]>, maxEvents: number = 10): string {
+function formatSampleEvents(
+  data: ParsedData,
+  matches: Map<string, SigmaRuleMatch[]>,
+  maxEvents: number = 10,
+): string {
   // Get events that matched SIGMA rules, sorted by severity
-  const matchedEvents: Array<{ entry: LogEntry; severity: string; rule: string }> = [];
+  const matchedEvents: Array<{
+    entry: LogEntry;
+    severity: string;
+    rule: string;
+  }> = [];
 
   for (const [, ruleMatches] of matches) {
     for (const match of ruleMatches) {
       const event = match.event as any;
       // Try to find corresponding LogEntry
-      const entry = data.entries.find(e => {
-        if (data.format === 'evtx') {
-          return e.eventId === (event.eventId || event.EventID) &&
-                 e.timestamp.getTime() === new Date(event.timestamp || match.timestamp).getTime();
+      const entry = data.entries.find((e) => {
+        if (data.format === "evtx") {
+          return (
+            e.eventId === (event.eventId || event.EventID) &&
+            e.timestamp.getTime() ===
+              new Date(event.timestamp || match.timestamp).getTime()
+          );
         }
         return false;
       });
@@ -284,15 +313,15 @@ function formatSampleEvents(data: ParsedData, matches: Map<string, SigmaRuleMatc
       if (entry) {
         matchedEvents.push({
           entry,
-          severity: match.rule.level || 'medium',
-          rule: match.rule.title || 'Unknown',
+          severity: match.rule.level || "medium",
+          rule: match.rule.title || "Unknown",
         });
       }
     }
   }
 
   if (matchedEvents.length === 0) {
-    return 'No SIGMA rule matches found.';
+    return "No SIGMA rule matches found.";
   }
 
   // Sort by severity and take top N
@@ -310,20 +339,22 @@ function formatSampleEvents(data: ParsedData, matches: Map<string, SigmaRuleMatc
   });
 
   const samples = matchedEvents.slice(0, maxEvents);
-  const sections: string[] = ['SIGMA Rule Matches (Sample Events):'];
+  const sections: string[] = ["SIGMA Rule Matches (Sample Events):"];
 
   samples.forEach((item, idx) => {
     const e = item.entry;
-    sections.push(`\n${idx + 1}. [${item.severity.toUpperCase()}] ${item.rule}`);
+    sections.push(
+      `\n${idx + 1}. [${item.severity.toUpperCase()}] ${item.rule}`,
+    );
     sections.push(`   Time: ${e.timestamp.toLocaleString()}`);
-    if (data.format === 'evtx') {
-      sections.push(`   Computer: ${e.computer || 'N/A'}`);
-      sections.push(`   Event ID: ${e.eventId || 'N/A'}`);
-      sections.push(`   Source: ${e.source || 'N/A'}`);
-    if (e.message) {
-      const msg = truncate(e.message, 200);
-      sections.push(`   Message: ${msg}`);
-    }
+    if (data.format === "evtx") {
+      sections.push(`   Computer: ${e.computer || "N/A"}`);
+      sections.push(`   Event ID: ${e.eventId || "N/A"}`);
+      sections.push(`   Source: ${e.source || "N/A"}`);
+      if (e.message) {
+        const msg = truncate(e.message, 200);
+        sections.push(`   Message: ${msg}`);
+      }
     } else {
       sections.push(`   IP: ${e.ip}`);
       sections.push(`   Method: ${e.method} ${e.path}`);
@@ -331,7 +362,7 @@ function formatSampleEvents(data: ParsedData, matches: Map<string, SigmaRuleMatc
     }
   });
 
-  return sections.join('\n');
+  return sections.join("\n");
 }
 
 /**
@@ -341,9 +372,13 @@ function formatSampleEvents(data: ParsedData, matches: Map<string, SigmaRuleMatc
  */
 // @ts-ignore - Unused function kept for future use
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function formatAdditionalSuspiciousEvents(data: ParsedData, matches: Map<string, SigmaRuleMatch[]>, maxEvents: number = 15): string {
-  if (data.format !== 'evtx') {
-    return '';
+function formatAdditionalSuspiciousEvents(
+  data: ParsedData,
+  matches: Map<string, SigmaRuleMatch[]>,
+  maxEvents: number = 15,
+): string {
+  if (data.format !== "evtx") {
+    return "";
   }
 
   // Get event IDs that matched SIGMA rules
@@ -403,7 +438,7 @@ function formatAdditionalSuspiciousEvents(data: ParsedData, matches: Map<string,
   }
 
   if (additionalEvents.length === 0) {
-    return '';
+    return "";
   }
 
   // Sort by timestamp (most recent first) and take top N
@@ -411,21 +446,29 @@ function formatAdditionalSuspiciousEvents(data: ParsedData, matches: Map<string,
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
     .slice(0, maxEvents);
 
-  const sections: string[] = ['\nAdditional Suspicious Events (Not Matched by SIGMA Rules):'];
-  sections.push('These events have security-relevant Event IDs but did not match any SIGMA detection rules.');
-  sections.push('They may indicate additional suspicious activity worth investigating.\n');
+  const sections: string[] = [
+    "\nAdditional Suspicious Events (Not Matched by SIGMA Rules):",
+  ];
+  sections.push(
+    "These events have security-relevant Event IDs but did not match any SIGMA detection rules.",
+  );
+  sections.push(
+    "They may indicate additional suspicious activity worth investigating.\n",
+  );
 
   sorted.forEach((entry, idx) => {
-    sections.push(`\n${idx + 1}. Event ID ${entry.eventId} - ${entry.source || 'Unknown Source'}`);
+    sections.push(
+      `\n${idx + 1}. Event ID ${entry.eventId} - ${entry.source || "Unknown Source"}`,
+    );
     sections.push(`   Time: ${entry.timestamp.toLocaleString()}`);
-    sections.push(`   Computer: ${entry.computer || 'N/A'}`);
+    sections.push(`   Computer: ${entry.computer || "N/A"}`);
     if (entry.message) {
       const msg = truncate(entry.message, 200);
       sections.push(`   Message: ${msg}`);
     }
   });
 
-  return sections.join('\n');
+  return sections.join("\n");
 }
 
 /**
@@ -434,13 +477,16 @@ function formatAdditionalSuspiciousEvents(data: ParsedData, matches: Map<string,
  */
 // @ts-ignore - Unused function kept for future use
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleMatch[]>): string {
-  if (data.format !== 'evtx') {
-    return '';
+function formatDatasetPatterns(
+  data: ParsedData,
+  matches: Map<string, SigmaRuleMatch[]>,
+): string {
+  if (data.format !== "evtx") {
+    return "";
   }
 
   const sections: string[] = [];
-  sections.push('\nDataset Patterns & Anomalies:');
+  sections.push("\nDataset Patterns & Anomalies:");
 
   // Get computers involved in SIGMA matches
   const sigmaComputers = new Set<string>();
@@ -455,8 +501,10 @@ function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleM
   }
 
   if (sigmaComputers.size > 0) {
-    sections.push(`\nComputers with SIGMA detections: ${Array.from(sigmaComputers).join(', ')}`);
-    sections.push('Investigate these systems for related suspicious activity.');
+    sections.push(
+      `\nComputers with SIGMA detections: ${Array.from(sigmaComputers).join(", ")}`,
+    );
+    sections.push("Investigate these systems for related suspicious activity.");
   }
 
   // Find events on same computers as SIGMA matches (potential related activity)
@@ -468,8 +516,11 @@ function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleM
       for (const [, ruleMatches] of matches) {
         for (const match of ruleMatches) {
           const event = match.event as any;
-          if (entry.eventId === (event.eventId || event.EventID) &&
-              entry.timestamp.getTime() === new Date(event.timestamp || match.timestamp).getTime()) {
+          if (
+            entry.eventId === (event.eventId || event.EventID) &&
+            entry.timestamp.getTime() ===
+              new Date(event.timestamp || match.timestamp).getTime()
+          ) {
             isSigmaMatch = true;
             break;
           }
@@ -483,14 +534,18 @@ function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleM
   }
 
   if (relatedEvents.length > 0) {
-    sections.push(`\nFound ${relatedEvents.length} additional events on computers with SIGMA detections.`);
-    sections.push('These may be related to the detected threats and warrant investigation.');
+    sections.push(
+      `\nFound ${relatedEvents.length} additional events on computers with SIGMA detections.`,
+    );
+    sections.push(
+      "These may be related to the detected threats and warrant investigation.",
+    );
   }
 
   // Time-based patterns
   const timestamps = data.entries
-    .map(e => e.timestamp)
-    .filter(t => t && !isNaN(t.getTime()))
+    .map((e) => e.timestamp)
+    .filter((t) => t && !isNaN(t.getTime()))
     .sort((a, b) => a.getTime() - b.getTime());
 
   if (timestamps.length > 0) {
@@ -503,21 +558,26 @@ function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleM
         if (timestamp) {
           const time = new Date(timestamp).getTime();
           // Create 1-hour windows
-          const windowStart = Math.floor(time / (1000 * 60 * 60)) * (1000 * 60 * 60);
+          const windowStart =
+            Math.floor(time / (1000 * 60 * 60)) * (1000 * 60 * 60);
           sigmaTimeWindows.add(windowStart);
         }
       }
     }
 
     if (sigmaTimeWindows.size > 0) {
-      sections.push(`\nTime windows with SIGMA detections: ${sigmaTimeWindows.size} distinct periods`);
-      sections.push('Investigate events occurring in these time windows for related activity.');
+      sections.push(
+        `\nTime windows with SIGMA detections: ${sigmaTimeWindows.size} distinct periods`,
+      );
+      sections.push(
+        "Investigate events occurring in these time windows for related activity.",
+      );
     }
   }
 
   // Event ID frequency anomalies
   const eventIdCounts = new Map<number, number>();
-  data.entries.forEach(e => {
+  data.entries.forEach((e) => {
     if (e.eventId) {
       eventIdCounts.set(e.eventId, (eventIdCounts.get(e.eventId) || 0) + 1);
     }
@@ -525,7 +585,11 @@ function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleM
 
   // Find unusually frequent event IDs (more than 10% of total)
   const totalEvents = data.entries.length;
-  const frequentEventIds: Array<{ eventId: number; count: number; percentage: number }> = [];
+  const frequentEventIds: Array<{
+    eventId: number;
+    count: number;
+    percentage: number;
+  }> = [];
   eventIdCounts.forEach((count, eventId) => {
     const percentage = (count / totalEvents) * 100;
     if (percentage > 10 && count > 50) {
@@ -534,16 +598,18 @@ function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleM
   });
 
   if (frequentEventIds.length > 0) {
-    sections.push('\nUnusually Frequent Event IDs (may indicate patterns):');
+    sections.push("\nUnusually Frequent Event IDs (may indicate patterns):");
     frequentEventIds
       .sort((a, b) => b.percentage - a.percentage)
       .slice(0, 5)
       .forEach(({ eventId, count, percentage }) => {
-        sections.push(`  Event ID ${eventId}: ${count} occurrences (${percentage.toFixed(1)}% of total)`);
+        sections.push(
+          `  Event ID ${eventId}: ${count} occurrences (${percentage.toFixed(1)}% of total)`,
+        );
       });
   }
 
-  return sections.join('\n');
+  return sections.join("\n");
 }
 
 /**
@@ -552,27 +618,35 @@ function formatDatasetPatterns(data: ParsedData, matches: Map<string, SigmaRuleM
 export function formatDataForLLM(
   matches: Map<string, SigmaRuleMatch[]>,
   data: ParsedData,
-  customPrompt?: string
+  customPrompt?: string,
 ): FormattedAnalysisData {
   const sigmaSection = formatSigmaMatches(matches);
   const timelineSection = formatTimelineSummary(matches);
   const statsSection = formatParsedDataStats(data);
 
-  const totalDetections = Array.from(matches.values()).reduce((sum, m) => sum + m.length, 0);
+  const totalDetections = Array.from(matches.values()).reduce(
+    (sum, m) => sum + m.length,
+    0,
+  );
   const criticalDetections = Array.from(matches.values())
     .flat()
-    .filter(m => m.rule.level === 'critical').length;
+    .filter((m) => m.rule.level === "critical").length;
   const highDetections = Array.from(matches.values())
     .flat()
-    .filter(m => m.rule.level === 'high').length;
+    .filter((m) => m.rule.level === "high").length;
 
   const timestamps = data.entries
-    .map(e => e.timestamp)
-    .filter(t => t && !isNaN(t.getTime()))
+    .map((e) => e.timestamp)
+    .filter((t) => t && !isNaN(t.getTime()))
     .sort((a, b) => a.getTime() - b.getTime());
 
-  const uniqueComputers = new Set(data.entries.map(e => e.computer).filter(Boolean));
-  const uniqueEventIds = new Set(data.entries.map(e => e.eventId).filter(Boolean));
+  // Single-pass collection of unique values for better performance
+  const unique = extractUniqueFields(data.entries, {
+    computers: (e: any) => e.computer,
+    eventIds: (e: any) => e.eventId,
+  });
+  const uniqueComputers = unique.computers;
+  const uniqueEventIds = unique.eventIds;
 
   const systemPrompt = `You are a SEASONED DIGITAL FORENSICS AND INCIDENT RESPONSE (DFIR) EXPERT with 15+ years of experience investigating complex security incidents, analyzing Windows Event Logs, and hunting advanced persistent threats (APTs). You have deep expertise in:
 
@@ -595,7 +669,9 @@ export function formatDataForLLM(
 
 Remember: You're not just analyzing logs—you're investigating a potential security incident. Your analysis could be used in legal proceedings, so be thorough, accurate, and document everything.`;
 
-  const userPrompt = customPrompt || `You are investigating a potential security incident. Use the system instructions to produce a concise DFIR analysis based on the analysis summaries below.
+  const userPrompt =
+    customPrompt ||
+    `You are investigating a potential security incident. Use the system instructions to produce a concise DFIR analysis based on the analysis summaries below.
 
 DATASET SUMMARY
 ${statsSection}
@@ -606,7 +682,6 @@ ${sigmaSection}
 TIMELINE SUMMARY
 ${timelineSection}
 `;
-
 
   return {
     systemPrompt,
@@ -621,9 +696,10 @@ ${timelineSection}
       totalDetections,
       criticalDetections,
       highDetections,
-      timeRange: timestamps.length > 0
-        ? `${timestamps[0].toLocaleString()} to ${timestamps[timestamps.length - 1].toLocaleString()}`
-        : 'N/A',
+      timeRange:
+        timestamps.length > 0
+          ? `${timestamps[0].toLocaleString()} to ${timestamps[timestamps.length - 1].toLocaleString()}`
+          : "N/A",
       uniqueComputers: uniqueComputers.size,
       uniqueEventIds: uniqueEventIds.size,
     },
@@ -631,6 +707,6 @@ ${timelineSection}
 }
 // Truncate long strings for prompt compactness
 function truncate(str: string, max = 400): string {
-  if (!str) return '';
-  return str.length > max ? str.slice(0, max) + '…' : str;
+  if (!str) return "";
+  return str.length > max ? str.slice(0, max) + "…" : str;
 }

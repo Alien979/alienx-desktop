@@ -365,6 +365,13 @@ export default function IOCExtractor({
         { name: "ip", value: entry.ip },
         { name: "computer", value: entry.computer },
         { name: "userAgent", value: entry.userAgent },
+        // Include all eventData fields for Excel/CSV files
+        ...(entry.eventData
+          ? Object.entries(entry.eventData).map(([key, val]) => ({
+              name: `eventData.${key}`,
+              value: val as string | undefined,
+            }))
+          : []),
       ];
 
       for (const { name, value } of searchFields) {
@@ -900,7 +907,9 @@ export default function IOCExtractor({
     const note = newActorIOCNote.trim();
     const bulkText = newActorBulkIOCText.trim();
 
-    const pushDetectedItems = (items: Array<{ type: IOCType; value: string }>) => {
+    const pushDetectedItems = (
+      items: Array<{ type: IOCType; value: string }>,
+    ) => {
       let added = 0;
       let duplicates = 0;
       let invalid = 0;
@@ -911,7 +920,9 @@ export default function IOCExtractor({
 
       for (const it of items) {
         const normalized =
-          it.type === "base64" ? it.value.trim() : it.value.trim().toLowerCase();
+          it.type === "base64"
+            ? it.value.trim()
+            : it.value.trim().toLowerCase();
         const key = `${it.type}:${normalized}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -1376,9 +1387,15 @@ export default function IOCExtractor({
                 resize: "vertical",
               }}
             />
-            <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: "6px 0 0" }}>
-              If bulk text is filled, values above (fixed type) are ignored.
-              The note applies to every added IOC.
+            <p
+              style={{
+                fontSize: "0.75rem",
+                color: "#9ca3af",
+                margin: "6px 0 0",
+              }}
+            >
+              If bulk text is filled, values above (fixed type) are ignored. The
+              note applies to every added IOC.
             </p>
             <input
               className="threat-input"

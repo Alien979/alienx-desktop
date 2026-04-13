@@ -146,6 +146,11 @@ export default function AnalysisSelector({
           let start = 0;
           let match: RegExpExecArray | null;
           while ((match = regex.exec(text)) !== null) {
+            // Type guard: ensure match[0] exists and has valid length
+            if (!match[0] || match[0].length === 0) {
+              console.warn("[AnalysisSelector] Invalid regex match detected");
+              break;
+            }
             if (match.index > start) {
               parts.push(text.slice(start, match.index));
             }
