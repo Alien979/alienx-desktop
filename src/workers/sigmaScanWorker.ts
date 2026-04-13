@@ -1,5 +1,6 @@
 // sigmaScanWorker.ts - ES module Web Worker for async Sigma detection with progress/cancel
-import { matchRules } from "../lib/sigma/engine/matcher";
+import { matchAllEventsOptimized } from "../lib/sigma/engine/optimizedMatcher";
+import { CompiledSigmaRule } from "../lib/sigma/types";
 
 let cancelled = false;
 
@@ -9,31 +10,39 @@ self.onmessage = async (e) => {
     cancelled = false;
     const { entries, rules } = payload;
     let matchesMap = new Map();
-    let matchesFound = 0;
     try {
-      // Progress-enabled matching
-      const total = entries.length;
-      matchesMap = new Map();
-      for (let i = 0; i < entries.length; i++) {
-        if (cancelled) break;
-        const event = entries[i];
-        const matches = matchRules(event, rules);
-        for (const match of matches) {
-          const ruleId = match.rule.id;
-          const existing = matchesMap.get(ruleId) || [];
-          existing.push(match);
-          matchesMap.set(ruleId, existing);
-          matchesFound++;
-        }
-        if (i % 500 === 0 || i === entries.length - 1) {
-          self.postMessage({
-            type: "progress",
-            processed: i + 1,
-            total,
-            matchesFound,
-          });
-        }
+      // Use optimized batch matcher with progress callback
+      const { matches, stats } = await matchAllEventsOptimized(
+        entries,
+        rules as CompiledSigmaRule[],
+        (completed: number, total: number) => {
+          if (!cancelled) {
+            self.postMessage({
+              type: "progress",
+              completed,
+              total,
+              matchesFound: Array.from(matches.values()).reduce(
+                (sum, m) => sum + m.length,
+                0,
+              ),
+            });
+          }
+        },
+        500, // chunkSize
+      );
+
+      if (cancelled) {
+        self.postMessage({ type: "cancelled" });
+        return;
       }
+
+      // Convert Map to plain object for transfer
+      const matchesObj = Object.fromEntries(matches);
+      self.postMessage({
+        type: "done",
+        matches: matchesObj,
+        stats, // Include optimization stats for debugging
+      });
     } catch (err) {
       self.postMessage({
         type: "error",
@@ -41,9 +50,6 @@ self.onmessage = async (e) => {
       });
       return;
     }
-    // Convert Map to plain object for transfer
-    const matches = Object.fromEntries(matchesMap);
-    self.postMessage({ type: "done", matches });
   } else if (type === "cancel") {
     cancelled = true;
   }

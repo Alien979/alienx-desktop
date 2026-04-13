@@ -227,20 +227,20 @@ export default function SigmaDetections({
     sigmaWorkerRef.current = worker;
 
     worker.onmessage = (e) => {
-      const { type, processed, total, matches, matchesFound } = e.data;
+      const { type, processed, completed, total, matches, matchesFound, stats } = e.data;
       if (type === "progress") {
         setProgress((prev) => ({
           ...prev,
-          processed: processed || prev.processed,
+          processed: completed ?? processed ?? prev.processed,
           total: total || prev.total,
-          matchesFound: matchesFound || prev.matchesFound,
+          matchesFound: matchesFound ?? prev.matchesFound,
         }));
       } else if (type === "done") {
         // Convert array to Map for compatibility
         const result = new Map(Object.entries(matches));
         setMatches(result as Map<string, SigmaRuleMatch[]>);
         setIsLoading(false);
-        setOptimizationStats(null); // Optionally set stats if worker returns them
+        setOptimizationStats(stats || null); // Set stats from worker if available
         if (onMatchesUpdateRef.current) {
           onMatchesUpdateRef.current(result as Map<string, SigmaRuleMatch[]>);
         }
