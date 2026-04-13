@@ -1,5 +1,5 @@
 // sigmaScanWorker.ts - ES module Web Worker for async Sigma detection with progress/cancel
-import { matchAllEventsOptimized } from "../lib/sigma/engine/optimizedMatcher";
+import { processEventsOptimized } from "../lib/sigma/engine/optimizedMatcher";
 import { CompiledSigmaRule } from "../lib/sigma/types";
 
 let cancelled = false;
@@ -9,10 +9,9 @@ self.onmessage = async (e) => {
   if (type === "start") {
     cancelled = false;
     const { entries, rules } = payload;
-    let matchesMap = new Map();
     try {
       // Use optimized batch matcher with progress callback
-      const { matches, stats } = await matchAllEventsOptimized(
+      const { matches, stats } = await processEventsOptimized(
         entries,
         rules as CompiledSigmaRule[],
         (completed: number, total: number) => {
@@ -22,7 +21,7 @@ self.onmessage = async (e) => {
               completed,
               total,
               matchesFound: Array.from(matches.values()).reduce(
-                (sum, m) => sum + m.length,
+                (sum, m) => sum + (m as any).length,
                 0,
               ),
             });

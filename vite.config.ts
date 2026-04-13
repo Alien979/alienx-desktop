@@ -97,6 +97,10 @@ export default defineConfig({
     },
   },
 
+  worker: {
+    format: "es", // Use ES modules for workers with code-splitting
+  },
+
   server: {
     fs: {
       // Allow serving files from samples and public
