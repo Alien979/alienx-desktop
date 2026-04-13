@@ -6,75 +6,125 @@ on:
       - "v*"
 
 jobs:
-  create-release:
+  release:
     name: Create Release
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          cache: "npm"
-
-      - name: Verify dependencies
-        run: npm install
-
-      - name: Verify build
-        run: npm run build
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           draft: false
           prerelease: false
+          generate_release_notes: true
           body: |
-            🚀 **AlienX Desktop ${{ github.ref_name }}** Released!
+            # 🚀 AlienX Desktop ${{ github.ref_name }}
 
-            ## 📥 Installation
+            ## 📥 Download & Installation
 
-            ### Windows
-            - Download the `.msi` or `.exe` installer from releases
-            - Run the installer and follow prompts
-            - Application will be available in Start Menu
+            ### 🪟 Windows
+            **Option 1: Pre-built Installer (Recommended)**
+            - Download `AlienX_Desktop_*_x64_en-US.msi` or `.exe` below
+            - Run installer and follow prompts
+            - Available in Start Menu after installation
 
-            ### macOS
-            - Download the `.dmg` file
-            - Double-click to mount
-            - Drag AlienX to Applications folder
-            - Launch from Applications
-
-            ### Linux
-            - Download the `.AppImage` file
-            - Run: `chmod +x alienx.AppImage && ./alienx.AppImage`
-
-            ## 📦 Building from Source
-
-            If platform-specific binaries are not yet available:
-
-            \`\`\`bash
+            **Option 2: Build from Source**
+            ```powershell
             git clone https://github.com/Alien979/alienx-desktop.git
             cd alienx-desktop
             npm install
             npm run tauri:build
-            \`\`\`
+            ```
+            Installers will be in: `src-tauri/target/release/bundle/nsis/` or `msi/`
 
-            Installers will be created in `src-tauri/target/release/bundle/`
+            ### 🍎 macOS  
+            **Pre-built DMG (Recommended)**
+            - Download `AlienX_Desktop_*_x64.dmg` (Intel) or `*_aarch64.dmg` (Apple Silicon)
+            - Double-click to mount
+            - Drag AlienX to Applications folder
+            - Launch from Applications
 
-            ## 📋 Features
-            - ✅ Standalone cross-platform application
-            - ✅ Forensic event log analysis
-            - ✅ SIGMA & YARA rule detection
+            **Build from Source**
+            ```bash
+            git clone https://github.com/Alien979/alienx-desktop.git
+            cd alienx-desktop
+            npm install
+            npm run tauri:build
+            ```
+
+            ### 🐧 Linux
+            **AppImage (Recommended)**
+            - Download `AlienX_Desktop_*_x64.AppImage`
+            - Make executable: `chmod +x AlienX_Desktop_*_x64.AppImage`
+            - Run: `./AlienX_Desktop_*_x64.AppImage`
+
+            **Build from Source**
+            ```bash
+            git clone https://github.com/Alien979/alienx-desktop.git
+            cd alienx-desktop
+            npm install
+            npm run tauri:build
+            ```
+
+            ## 📋 Build Requirements (For Source Builds)
+
+            ### All Platforms
+            - Node.js 18+ and npm
+            - Rust toolchain (install via rustup)
+            - TypeScript 5.0+
+
+            ### macOS
+            - Xcode Command Line Tools
+            - Apple Silicon: Additional ARM64 toolchain
+
+            ### Linux
+            - Build essentials (gcc, make, cmake)
+            - Development headers (libssl-dev, libgtk-3-dev, webkit2gtk-4.1)
+
+            ### Windows
+            - Visual Studio Build Tools or MSVC
+            - Windows SDK
+
+            ## ✨ What's New
+
+            - ✅ Standalone cross-platform desktop application
+            - ✅ Forensic Windows event log analysis
+            - ✅ SIGMA rule threat detection
+            - ✅ YARA pattern matching
+            - ✅ Timeline correlation
+            - ✅ Excel/HTML report generation
             - ✅ Offline processing
-            - ✅ Export reports to Excel/HTML
 
-            ## 🔗 Resources
+            ## 📖 Resources
+
             - [Installation Guide](https://github.com/Alien979/alienx-desktop/blob/main/INSTALLATION_GUIDE.md)
-            - [User Guide](https://github.com/Alien979/alienx-desktop/blob/main/README.md)
+            - [Quick Start Guide](https://github.com/Alien979/alienx-desktop/blob/main/QUICK_START_BUILD.md)
+            - [User Documentation](https://github.com/Alien979/alienx-desktop/blob/main/README.md)
             - [Report Issues](https://github.com/Alien979/alienx-desktop/issues)
+
+            ## 🔐 Verify Builds
+
+            ### Windows Defender SmartScreen
+            Pre-built installers may show a warning. This is normal for new applications.
+            - Click "More info" then "Run anyway"
+            - To remove warning: [Windows Code Signing Guide](https://github.com/Alien979/alienx-desktop/blob/main/WINDOWS_CODE_SIGNING_GUIDE.md)
+
+            ### macOS Gatekeeper
+            If you get "cannot be opened because it is from an unidentified developer":
+            ```bash
+            xattr -d com.apple.quarantine /Applications/AlienX.app
+            ```
+
+            ## 🤝 Contributing
+
+            Contributions welcome! See [CONTRIBUTING.md](https://github.com/Alien979/alienx-desktop/blob/main/CONTRIBUTING.md)
+
+            ## 📄 License
+
+            See [LICENSE](https://github.com/Alien979/alienx-desktop/blob/main/LICENSE)
 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
