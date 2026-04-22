@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LogPlatform } from "../types";
 import { BundledYaraRule, loadBundledYaraRules } from "../lib/yara";
 import {
@@ -27,6 +27,11 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [bundledRuleCount, setBundledRuleCount] = useState<number | null>(null);
   const [loadingBundledCount, setLoadingBundledCount] = useState(false);
+  const [bundledRules, setBundledRules] = useState<BundledYaraRule[]>([]);
+  const [bundledSearchQuery, setBundledSearchQuery] = useState("");
+  const [expandedBundledRuleId, setExpandedBundledRuleId] = useState<
+    string | null
+  >(null);
   const [draftRule, setDraftRule] = useState<CustomYaraRuleDraft>({
     title: "",
     description: "",
@@ -95,10 +100,42 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
       setLoadingBundledCount(true);
       const rules = await loadBundledYaraRules(platform);
       setBundledRuleCount(rules.length);
+      setBundledRules(rules);
     } finally {
       setLoadingBundledCount(false);
     }
   };
+
+  // Load bundled rules on mount
+  useEffect(() => {
+    handleRefreshBundledCount();
+  }, [platform]);
+
+  const handleCopyBundledRule = (rule: BundledYaraRule) => {
+    setEditingRuleId(null);
+    setCustomRuleError(null);
+    const draft = customRuleToDraft(rule);
+    // Modify title to indicate it's a copy
+    draft.title = `${rule.title} (custom)`;
+    setDraftRule(draft);
+    // Scroll to form
+    const formElement = document.querySelector(".yara-form-section");
+    if (formElement) {
+      formElement.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const filteredBundledRules = useMemo(() => {
+    const query = bundledSearchQuery.toLowerCase();
+    if (!query) return bundledRules;
+    return bundledRules.filter(
+      (rule) =>
+        rule.title.toLowerCase().includes(query) ||
+        rule.description?.toLowerCase().includes(query) ||
+        rule.name.toLowerCase().includes(query) ||
+        rule.tags?.some((tag) => tag.toLowerCase().includes(query)),
+    );
+  }, [bundledRules, bundledSearchQuery]);
 
   return (
     <div className="dashboard">
@@ -106,7 +143,8 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
         <div>
           <h1>YARA Rule Lab</h1>
           <p className="tagline">
-            Create and maintain custom rules separately from live detections.
+            Browse bundled rules and create custom rules for advanced detection
+            tuning.
           </p>
         </div>
         <div className="header-buttons">
@@ -121,16 +159,70 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
         <p style={{ color: "var(--text-muted)", marginBottom: "0.6rem" }}>
           Custom rules for {platform}: {platformCustomRules.length}
           {bundledRuleCount !== null
-            ? ` • Bundled rules: ${bundledRuleCount}`
+            ? ` • Bundled rules available: ${bundledRuleCount}`
             : ""}
         </p>
         <button className="timeline-button" onClick={handleRefreshBundledCount}>
-          {loadingBundledCount ? "Checking..." : "Refresh bundled rule count"}
+          {loadingBundledCount ? "Loading..." : "Refresh Rules"}
         </button>
       </div>
 
       <div className="chart-card" style={{ marginBottom: "1rem" }}>
+        <h3>How to build effective rules</h3>
+        <details>
+          <summary style={{ cursor: "pointer", color: "var(--text-muted)" }}>
+            Quick guidance (recommended defaults)
+          </summary>
+          <div style={{ marginTop: "0.75rem", color: "var(--text-primary)" }}>
+            <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+              <li>
+                <strong>Literals</strong>: one per line. Use stable tokens you
+                expect in the raw event text (process names, suspicious flags,
+                domains, registry paths).
+              </li>
+              <li>
+                <strong>Min matches</strong>: start with 2–3 to reduce false
+                positives. Increase if the rule is too noisy.
+              </li>
+              <li>
+                <strong>Exclusions</strong>: add known-benign strings (one per
+                line) to suppress expected activity.
+              </li>
+              <li>
+                <strong>Platform</strong>: keep Windows vs Linux rules separate
+                when possible (paths/commands differ).
+              </li>
+            </ul>
+            <div
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.85rem",
+                color: "var(--text-muted)",
+              }}
+            >
+              Tip: create a broad first version, run analysis, then refine with
+              exclusions and a higher min-match threshold.
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div
+        className="chart-card yara-form-section"
+        style={{ marginBottom: "1rem" }}
+      >
         <h3>{editingRuleId ? "Edit Custom Rule" : "Create Custom Rule"}</h3>
+        <p
+          style={{
+            color: "var(--text-muted)",
+            fontSize: "0.85rem",
+            marginBottom: "0.75rem",
+          }}
+        >
+          {editingRuleId
+            ? "Modify an existing custom rule"
+            : "Create a new rule from scratch or copy a bundled rule"}
+        </p>
 
         <div style={{ display: "grid", gap: "0.6rem", marginTop: "0.75rem" }}>
           <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
@@ -293,11 +385,12 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
         </div>
       </div>
 
-      <div className="chart-card">
+      <div className="chart-card" style={{ marginBottom: "1rem" }}>
         <h3>Custom Rules ({platformCustomRules.length})</h3>
         {platformCustomRules.length === 0 ? (
           <p style={{ color: "var(--text-muted)" }}>
-            No custom rules for {platform} yet.
+            No custom rules for {platform} yet. Create one or copy an existing
+            bundled rule above.
           </p>
         ) : (
           <div
@@ -326,7 +419,13 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
                     {rule.platform}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "0.5rem",
+                    alignItems: "center",
+                  }}
+                >
                   <label
                     style={{
                       display: "flex",
@@ -357,13 +456,271 @@ export default function YaraRuleLab({ platform, onBack }: YaraRuleLabProps) {
                   </button>
                   <button
                     className="timeline-button"
-                    onClick={() => handleDeleteCustomRule(rule.id)}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Delete rule "${rule.title}"?\n\nThis cannot be undone.`,
+                        )
+                      ) {
+                        handleDeleteCustomRule(rule.id);
+                      }
+                    }}
+                    style={{ color: "#f87171" }}
+                    title="Delete this rule permanently"
                   >
                     Delete
                   </button>
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Bundled Rules Browser */}
+      <div className="chart-card" style={{ marginBottom: "1rem" }}>
+        <h3>
+          Bundled YARA Rules ({filteredBundledRules.length})
+          <span
+            style={{
+              fontSize: "0.8rem",
+              color: "var(--text-muted)",
+              marginLeft: "0.5rem",
+            }}
+          >
+            from internet repositories
+          </span>
+        </h3>
+
+        <div style={{ marginTop: "0.75rem", marginBottom: "0.75rem" }}>
+          <input
+            type="text"
+            value={bundledSearchQuery}
+            onChange={(e) => setBundledSearchQuery(e.target.value)}
+            placeholder="Search by name, title, or tags..."
+            style={{
+              width: "100%",
+              background: "var(--bg-hover)",
+              border: "1px solid var(--border-primary)",
+              color: "var(--text-primary)",
+              borderRadius: 8,
+              padding: "0.5rem",
+            }}
+          />
+        </div>
+
+        {filteredBundledRules.length === 0 ? (
+          <p style={{ color: "var(--text-muted)" }}>
+            {bundledRuleCount === 0
+              ? "No bundled rules loaded. Click Refresh Rules to load them."
+              : "No rules match your search."}
+          </p>
+        ) : (
+          <div
+            style={{ display: "grid", gap: "0.45rem", marginTop: "0.75rem" }}
+          >
+            {filteredBundledRules.map((rule) => {
+              const isExpanded = expandedBundledRuleId === rule.id;
+              return (
+                <div
+                  key={rule.id}
+                  style={{
+                    border: "1px solid var(--border-secondary)",
+                    borderRadius: 8,
+                    padding: "0.65rem",
+                    background: "var(--bg-hover)",
+                  }}
+                >
+                  <div
+                    onClick={() =>
+                      setExpandedBundledRuleId(isExpanded ? null : rule.id)
+                    }
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: "0.75rem",
+                      cursor: "pointer",
+                      userSelect: "none",
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, marginBottom: "0.25rem" }}>
+                        {rule.title}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {rule.literals.length} literals • min {rule.minMatches}{" "}
+                        • {rule.platform}
+                        {rule.source && ` • ${rule.source}`}
+                      </div>
+                      {rule.tags && rule.tags.length > 0 && (
+                        <div style={{ marginTop: "0.25rem" }}>
+                          {rule.tags.slice(0, 3).map((tag) => (
+                            <span
+                              key={tag}
+                              style={{
+                                display: "inline-block",
+                                fontSize: "0.7rem",
+                                backgroundColor: "#6366f122",
+                                color: "#6366f1",
+                                padding: "0.15rem 0.4rem",
+                                borderRadius: "3px",
+                                marginRight: "0.3rem",
+                              }}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                          {rule.tags.length > 3 && (
+                            <span
+                              style={{
+                                fontSize: "0.7rem",
+                                color: "var(--text-muted)",
+                                marginLeft: "0.2rem",
+                              }}
+                            >
+                              +{rule.tags.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      {rule.source === "custom" ? (
+                        <>
+                          <button
+                            className="timeline-button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditCustomRule(rule);
+                            }}
+                            title="Edit this custom rule"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="timeline-button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (
+                                window.confirm(`Delete rule "${rule.title}"?`)
+                              ) {
+                                handleDeleteCustomRule(rule.id);
+                              }
+                            }}
+                            title="Delete this custom rule"
+                            style={{ color: "#f87171" }}
+                          >
+                            Delete
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="timeline-button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCopyBundledRule(rule);
+                          }}
+                          title="Copy this rule as a starting point for a custom rule"
+                        >
+                          Copy
+                        </button>
+                      )}
+                      <span style={{ color: "var(--text-muted)" }}>
+                        {isExpanded ? "▼" : "▶"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div
+                      style={{
+                        marginTop: "0.65rem",
+                        paddingTop: "0.65rem",
+                        borderTop: "1px solid var(--border-primary)",
+                      }}
+                    >
+                      {rule.description && (
+                        <div style={{ marginBottom: "0.5rem" }}>
+                          <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                            Description
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.8rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {rule.description}
+                          </div>
+                        </div>
+                      )}
+                      {rule.author && (
+                        <div style={{ marginBottom: "0.5rem" }}>
+                          <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                            Author
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.8rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {rule.author}
+                          </div>
+                        </div>
+                      )}
+                      <div style={{ marginBottom: "0.5rem" }}>
+                        <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                          Literals ({rule.literals.length})
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--text-muted)",
+                            maxHeight: "150px",
+                            overflowY: "auto",
+                          }}
+                        >
+                          {rule.literals.map((lit, idx) => (
+                            <div key={idx} style={{ marginTop: "0.2rem" }}>
+                              • {lit.length > 80 ? lit.slice(0, 80) + "…" : lit}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {rule.exclusions && rule.exclusions.length > 0 && (
+                        <div style={{ marginBottom: "0.5rem" }}>
+                          <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                            Exclusions ({rule.exclusions.length})
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.8rem",
+                              color: "var(--text-muted)",
+                              maxHeight: "100px",
+                              overflowY: "auto",
+                            }}
+                          >
+                            {rule.exclusions.map((exc, idx) => (
+                              <div key={idx} style={{ marginTop: "0.2rem" }}>
+                                •{" "}
+                                {exc.length > 80 ? exc.slice(0, 80) + "…" : exc}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

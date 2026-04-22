@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-19T19:55:55.527Z",
+  "generatedAt": "2026-04-22T11:54:56.196Z",
   "sources": [
     {
       "id": "yara-rules",
@@ -51,30 +51,30 @@
     }
   ],
   "summary": {
-    "totalFiles": 4175,
+    "totalFiles": 4173,
     "byPlatform": {
-      "windows": 832,
+      "windows": 831,
       "linux": 259,
-      "all": 3084
+      "all": 3083
     },
     "bySource": {
       "yara-rules": {
         "name": "Yara-Rules",
         "repo": "https://github.com/Yara-Rules/rules.git",
         "branch": "master",
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
-        "totalFiles": 566,
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
+        "totalFiles": 565,
         "byPlatform": {
           "windows": 64,
           "linux": 9,
-          "all": 493
+          "all": 492
         }
       },
       "signature-base": {
         "name": "Neo23x0 Signature-Base",
         "repo": "https://github.com/Neo23x0/signature-base.git",
         "branch": "master",
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
         "totalFiles": 738,
         "byPlatform": {
           "windows": 60,
@@ -86,7 +86,7 @@
         "name": "ReversingLabs YARA Rules",
         "repo": "https://github.com/reversinglabs/reversinglabs-yara-rules.git",
         "branch": null,
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
         "totalFiles": 310,
         "byPlatform": {
           "windows": 246,
@@ -98,7 +98,7 @@
         "name": "Advanced Threat Research YARA Rules",
         "repo": "https://github.com/advanced-threat-research/Yara-Rules.git",
         "branch": "master",
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
         "totalFiles": 125,
         "byPlatform": {
           "windows": 6,
@@ -110,7 +110,7 @@
         "name": "Elastic Protections Artifacts",
         "repo": "https://github.com/elastic/protections-artifacts.git",
         "branch": null,
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
         "totalFiles": 668,
         "byPlatform": {
           "windows": 385,
@@ -122,7 +122,7 @@
         "name": "bartblaze Yara-Rules",
         "repo": "https://github.com/bartblaze/Yara-Rules.git",
         "branch": "master",
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
         "totalFiles": 110,
         "byPlatform": {
           "windows": 5,
@@ -134,10 +134,10 @@
         "name": "InQuest Community YARA Rules",
         "repo": "https://github.com/InQuest/yara-rules.git",
         "branch": "master",
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
-        "totalFiles": 38,
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
+        "totalFiles": 37,
         "byPlatform": {
-          "windows": 8,
+          "windows": 7,
           "linux": 0,
           "all": 30
         }
@@ -146,7 +146,7 @@
         "name": "Malpedia Signator Rules",
         "repo": "https://github.com/malpedia/signator-rules.git",
         "branch": "main",
-        "revision": "c0f94735087b22e383394c2632edf24386edd30f",
+        "revision": "cecf77dc6960e82be0f52de914ed8737b9742dd5",
         "totalFiles": 1620,
         "byPlatform": {
           "windows": 58,
@@ -3540,12 +3540,6 @@
       "path": "webshells/WShell_PHP_in_images.yar",
       "platform": "all",
       "sizeBytes": 559
-    },
-    {
-      "source": "yara-rules",
-      "path": "webshells/WShell_THOR_Webshells.yar",
-      "platform": "all",
-      "sizeBytes": 315398
     },
     {
       "source": "yara-rules",
@@ -15420,12 +15414,6 @@
       "path": "Microsoft_Excel_Data_Connection.rule",
       "platform": "windows",
       "sizeBytes": 646
-    },
-    {
-      "source": "inquest",
-      "path": "Microsoft_Office_DDE_Command_Execution.rule",
-      "platform": "windows",
-      "sizeBytes": 6267
     },
     {
       "source": "inquest",

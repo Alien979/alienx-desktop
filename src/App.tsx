@@ -34,6 +34,13 @@ import type { LogEntry } from "./types";
 import { clearVTCache } from "./lib/vtCache";
 import { createSigmaEngine, SigmaEngine } from "./lib/sigma";
 import { SigmaRuleMatch } from "./lib/sigma/types";
+import {
+  getCached,
+  setCached,
+  makeCacheKey,
+  makeDatasetFingerprint,
+  makeRulesetFingerprint,
+} from "./lib/analysisCache";
 import type { YaraRuleMatch, YaraScanStats } from "./lib/yara";
 import type { SigmaPlatform } from "./lib/sigma/utils/autoLoadRules";
 import SigmaDetections from "./components/SigmaDetections";
@@ -157,6 +164,114 @@ function App() {
       strictValidation: false,
     });
   }, []);
+
+  // Central scan cache key for Sigma (dataset + ruleset + options)
+  const sigmaCacheKey = useMemo(() => {
+    if (!parsedData) return null;
+
+    // Use a lightweight fingerprint: counts + source files + time bounds.
+    const times = parsedData.entries
+      .map((e) => e.timestamp)
+      .filter(Boolean)
+      .map((t) => new Date(t as any).getTime())
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b);
+    const firstTimestamp =
+      times.length > 0 ? new Date(times[0]).toISOString() : null;
+    const lastTimestamp =
+      times.length > 0 ? new Date(times[times.length - 1]).toISOString() : null;
+
+    const datasetFingerprint = makeDatasetFingerprint({
+      platform: parsedData.platform,
+      format: parsedData.format,
+      filename,
+      entriesCount: parsedData.entries.length,
+      parsedLines: parsedData.parsedLines,
+      sourceFiles: parsedData.sourceFiles,
+      firstTimestamp,
+      lastTimestamp,
+    });
+
+    const ruleIds = sigmaEngine.getAllRules().map((r) => r.rule.id);
+    const rulesetFingerprint = makeRulesetFingerprint({
+      kind: "sigma",
+      ruleIds,
+      options: { selectedPlatform },
+    });
+
+    return makeCacheKey({
+      kind: "sigma",
+      datasetFingerprint,
+      rulesetFingerprint,
+      engineVersion: "sigma-engine-v1",
+    });
+  }, [parsedData, filename, selectedPlatform, sigmaEngine]);
+
+  const yaraCacheKey = useMemo(() => {
+    if (!parsedData) return null;
+    // We cache YARA by dataset + strictness + enabled custom rules snapshot.
+    // Bundled rules are stable for a given build, so we treat the build as the engineVersion.
+    const times = parsedData.entries
+      .map((e) => e.timestamp)
+      .filter(Boolean)
+      .map((t) => new Date(t as any).getTime())
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b);
+    const firstTimestamp =
+      times.length > 0 ? new Date(times[0]).toISOString() : null;
+    const lastTimestamp =
+      times.length > 0 ? new Date(times[times.length - 1]).toISOString() : null;
+
+    const datasetFingerprint = makeDatasetFingerprint({
+      platform: parsedData.platform,
+      format: parsedData.format,
+      filename,
+      entriesCount: parsedData.entries.length,
+      parsedLines: parsedData.parsedLines,
+      sourceFiles: parsedData.sourceFiles,
+      firstTimestamp,
+      lastTimestamp,
+    });
+
+    // We don't have bundled rule ids readily without loading them, so cache is keyed
+    // by a conservative "ruleset" fingerprint that includes platform + strictness.
+    const rulesetFingerprint = makeRulesetFingerprint({
+      kind: "yara",
+      ruleIds: [`platform:${parsedData.platform}`],
+      options: {},
+    });
+
+    return makeCacheKey({
+      kind: "yara",
+      datasetFingerprint,
+      rulesetFingerprint,
+      engineVersion: "yara-engine-v1",
+    });
+  }, [parsedData, filename]);
+
+  // Hydrate sigma results from cache when appropriate.
+  useEffect(() => {
+    if (!sigmaCacheKey) return;
+    if (sigmaHasRun) return;
+    if (sigmaMatches.size > 0) return;
+
+    const cached = getCached<Array<[string, SigmaRuleMatch[]]>>(sigmaCacheKey);
+    if (!cached) return;
+
+    setSigmaMatches(new Map(cached));
+    setSigmaHasRun(true);
+  }, [sigmaCacheKey, sigmaHasRun, sigmaMatches.size]);
+
+  useEffect(() => {
+    if (!yaraCacheKey) return;
+    if (yaraMatches && yaraStats) return;
+    const cached = getCached<{ matches: YaraRuleMatch[]; stats: YaraScanStats | null }>(
+      yaraCacheKey,
+    );
+    if (!cached) return;
+    setYaraMatches(cached.matches);
+    setYaraStats(cached.stats);
+  }, [yaraCacheKey, yaraMatches, yaraStats]);
 
   const handleFileLoaded = (data: ParsedData, name: string) => {
     ruleLoadRequestIdRef.current += 1;
@@ -526,12 +641,19 @@ function App() {
           onMatchesUpdate={(matches) => {
             setSigmaMatches(matches);
             setSigmaHasRun(true);
+            if (sigmaCacheKey) {
+              // Store Map as an array for JSON safety
+              setCached(sigmaCacheKey, Array.from(matches.entries()));
+            }
           }}
           cachedYaraMatches={yaraMatches ?? undefined}
           cachedYaraStats={yaraStats ?? undefined}
           onYaraMatchesUpdate={(matches, stats) => {
             setYaraMatches(matches);
             setYaraStats(stats);
+            if (yaraCacheKey) {
+              setCached(yaraCacheKey, { matches, stats });
+            }
           }}
           onOpenYaraRuleLab={() => setAnalysisMode("yara-rule-lab")}
           playbookFilterId={activePlaybookId}
@@ -1005,7 +1127,7 @@ function TimelineAnalysisView({
               setSigmaMatches(matches);
               setHasProcessed(true);
             }}
-            cachedMatches={sigmaMatches}
+            cachedMatches={hasProcessed ? sigmaMatches : undefined}
             sourceFiles={data.sourceFiles}
           />
         </section>

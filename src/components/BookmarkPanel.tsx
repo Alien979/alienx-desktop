@@ -2,13 +2,17 @@ import { useState, useMemo } from "react";
 import { LogEntry } from "../types";
 import {
   getBookmarks,
+  getIOCBookmarks,
   removeBookmark,
+  removeIOCBookmark,
   clearBookmarks,
   EventBookmark,
+  IOCBookmark,
   BookmarkTag,
   BOOKMARK_TAGS,
   BOOKMARK_COLORS,
   addBookmark,
+  addIOCBookmark,
 } from "../lib/eventBookmarks";
 import { EventCompare } from "./EventCompare";
 
@@ -19,6 +23,7 @@ interface BookmarkPanelProps {
 }
 
 type SortKey = "time" | "tag" | "added";
+type BookmarkType = "events" | "iocs" | "all";
 
 export default function BookmarkPanel({
   entries,
@@ -27,6 +32,7 @@ export default function BookmarkPanel({
 }: BookmarkPanelProps) {
   const [filterTag, setFilterTag] = useState<BookmarkTag | "all">("all");
   const [sortBy, setSortBy] = useState<SortKey>("added");
+  const [bookmarkType, setBookmarkType] = useState<BookmarkType>("all");
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editNote, setEditNote] = useState("");
   const [bookmarkVersion, setBookmarkVersion] = useState(0);
@@ -35,7 +41,12 @@ export default function BookmarkPanel({
   const [showCompare, setShowCompare] = useState(false);
 
   // Re-read bookmarks when version bumps (after add/remove/edit)
-  const bookmarks = useMemo(() => getBookmarks(), [bookmarkVersion]);
+  const eventBookmarks = useMemo(() => getBookmarks(), [bookmarkVersion]);
+  const iocBookmarks = useMemo(() => getIOCBookmarks(), [bookmarkVersion]);
+  const allBookmarks = useMemo(
+    () => [...eventBookmarks, ...iocBookmarks],
+    [eventBookmarks, iocBookmarks],
+  );
 
   const findEntry = (bk: EventBookmark): LogEntry | null => {
     // eventIndex is a hash code (not an array index), so search by matching
@@ -51,16 +62,31 @@ export default function BookmarkPanel({
     );
   };
 
+  const isEventBookmark = (bk: any): bk is EventBookmark =>
+    "eventIndex" in bk && "eventId" in bk;
+  const isIOCBookmark = (bk: any): bk is IOCBookmark =>
+    "ioc" in bk && "iocType" in bk;
+
   const filtered = useMemo(() => {
-    let list = [...bookmarks];
+    let list = [...allBookmarks];
+
+    // Filter by bookmark type
+    if (bookmarkType === "events") {
+      list = list.filter(isEventBookmark);
+    } else if (bookmarkType === "iocs") {
+      list = list.filter(isIOCBookmark);
+    }
+
     if (filterTag !== "all") {
       list = list.filter((b) => b.tag === filterTag);
     }
+
     if (sortBy === "time") {
-      list.sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-      );
+      list.sort((a, b) => {
+        const timeA = isEventBookmark(a) ? a.timestamp : a.createdAt;
+        const timeB = isEventBookmark(b) ? b.timestamp : b.createdAt;
+        return new Date(timeA).getTime() - new Date(timeB).getTime();
+      });
     } else if (sortBy === "tag") {
       const order: BookmarkTag[] = [
         "malicious",
@@ -73,25 +99,33 @@ export default function BookmarkPanel({
     }
     // "added" = default insertion order
     return list;
-  }, [bookmarks, filterTag, sortBy]);
+  }, [allBookmarks, filterTag, sortBy, bookmarkType]);
 
-  const handleRemove = (eventIndex: number) => {
-    removeBookmark(eventIndex);
+  const handleRemove = (bk: EventBookmark | IOCBookmark) => {
+    if (isEventBookmark(bk)) {
+      removeBookmark(bk.eventIndex);
+    } else {
+      removeIOCBookmark(bk.ioc, bk.iocType);
+    }
     setBookmarkVersion((v) => v + 1);
   };
 
   const handleClearAll = () => {
     if (
-      bookmarks.length > 0 &&
-      confirm(`Remove all ${bookmarks.length} bookmarks?`)
+      allBookmarks.length > 0 &&
+      confirm(`Remove all ${allBookmarks.length} bookmarks?`)
     ) {
       clearBookmarks();
       setBookmarkVersion((v) => v + 1);
     }
   };
 
-  const handleSaveNote = (bk: EventBookmark) => {
-    addBookmark({ ...bk, note: editNote });
+  const handleSaveNote = (bk: EventBookmark | IOCBookmark) => {
+    if (isEventBookmark(bk)) {
+      addBookmark({ ...bk, note: editNote });
+    } else {
+      addIOCBookmark({ ...bk, note: editNote });
+    }
     setEditingIdx(null);
     setBookmarkVersion((v) => v + 1);
   };
@@ -99,13 +133,18 @@ export default function BookmarkPanel({
   const handleCopyAll = async () => {
     const text = filtered
       .map((bk) => {
-        const entry = findEntry(bk);
-        const time = bk.timestamp || "?";
-        const eid = bk.eventId || "?";
         const tag = bk.tag.toUpperCase();
         const note = bk.note ? ` — ${bk.note}` : "";
-        const source = entry?.sourceFile || "";
-        return `[${tag}] EID ${eid} @ ${time}${source ? ` (${source})` : ""}${note}`;
+
+        if (isEventBookmark(bk)) {
+          const entry = findEntry(bk);
+          const time = bk.timestamp || "?";
+          const eid = bk.eventId || "?";
+          const source = entry?.sourceFile || "";
+          return `[${tag}] EID ${eid} @ ${time}${source ? ` (${source})` : ""}${note}`;
+        } else {
+          return `[${tag}] IOC ${bk.ioc} (${bk.iocType}, ${bk.eventCount} events)${note}`;
+        }
       })
       .join("\n");
     try {
@@ -120,22 +159,46 @@ export default function BookmarkPanel({
       alert("No bookmarks to export.");
       return;
     }
-    const rows = ["tag,event_id,timestamp,source_file,note"];
+    const quote = (value: string | number) =>
+      `"${String(value || "").replace(/"/g, '""')}"`;
+    const rows = [
+      "type,tag,event_id,timestamp,source_file,ioc,ioc_type,event_count,note",
+    ];
     for (const bk of filtered) {
-      const entry = findEntry(bk);
-      const quote = (value: string) =>
-        `"${String(value || "").replace(/"/g, '""')}"`;
-      rows.push(
-        [
-          bk.tag,
-          bk.eventId,
-          bk.timestamp,
-          entry?.sourceFile || "",
-          bk.note || "",
-        ]
-          .map(quote)
-          .join(","),
-      );
+      if (isEventBookmark(bk)) {
+        const entry = findEntry(bk);
+        rows.push(
+          [
+            "event",
+            bk.tag,
+            bk.eventId,
+            bk.timestamp,
+            entry?.sourceFile || "",
+            "",
+            "",
+            "",
+            bk.note || "",
+          ]
+            .map(quote)
+            .join(","),
+        );
+      } else {
+        rows.push(
+          [
+            "ioc",
+            bk.tag,
+            "",
+            "",
+            "",
+            bk.ioc,
+            bk.iocType,
+            bk.eventCount,
+            bk.note || "",
+          ]
+            .map(quote)
+            .join(","),
+        );
+      }
     }
     const blob = new Blob([rows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -153,20 +216,35 @@ export default function BookmarkPanel({
     }
     const now = new Date().toISOString();
     const objects = filtered.map((bk) => {
-      const entry = findEntry(bk);
-      return {
-        type: "x-oca-event",
-        spec_version: "2.1",
-        id: `x-oca-event--${crypto.randomUUID()}`,
-        created: now,
-        modified: now,
-        event_id: bk.eventId,
-        timestamp: bk.timestamp,
-        labels: ["alienx-bookmark", `bookmark:${bk.tag}`],
-        note: bk.note || "",
-        source_file: entry?.sourceFile || "",
-        raw: entry?.rawLine || "",
-      };
+      if (isEventBookmark(bk)) {
+        const entry = findEntry(bk);
+        return {
+          type: "x-oca-event",
+          spec_version: "2.1",
+          id: `x-oca-event--${crypto.randomUUID()}`,
+          created: now,
+          modified: now,
+          event_id: bk.eventId,
+          timestamp: bk.timestamp,
+          labels: ["alienx-bookmark", `bookmark:${bk.tag}`],
+          note: bk.note || "",
+          source_file: entry?.sourceFile || "",
+          raw: entry?.rawLine || "",
+        };
+      } else {
+        return {
+          type: "x-ioc-indicator",
+          spec_version: "2.1",
+          id: `x-ioc-indicator--${crypto.randomUUID()}`,
+          created: now,
+          modified: now,
+          value: bk.ioc,
+          indicator_type: bk.iocType,
+          labels: ["alienx-bookmark", `bookmark:${bk.tag}`],
+          note: bk.note || "",
+          event_count: bk.eventCount,
+        };
+      }
     });
     const json = JSON.stringify(
       {
@@ -250,9 +328,7 @@ export default function BookmarkPanel({
             marginBottom: 12,
           }}
         >
-          <h3 style={{ margin: 0 }}>
-            🔖 Bookmarked Events ({bookmarks.length})
-          </h3>
+          <h3 style={{ margin: 0 }}>🔖 Bookmarks ({allBookmarks.length})</h3>
           <button
             onClick={onClose}
             style={{
@@ -277,6 +353,24 @@ export default function BookmarkPanel({
             alignItems: "center",
           }}
         >
+          <select
+            value={bookmarkType}
+            onChange={(e) => setBookmarkType(e.target.value as BookmarkType)}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 4,
+              background: "#1e1e2e",
+              color: "#eee",
+              border: "1px solid #444",
+              fontSize: "0.8rem",
+            }}
+          >
+            <option value="all">All Bookmarks</option>
+            <option value="events">
+              Events Only ({eventBookmarks.length})
+            </option>
+            <option value="iocs">IOCs Only ({iocBookmarks.length})</option>
+          </select>
           <select
             value={filterTag}
             onChange={(e) =>
@@ -311,7 +405,7 @@ export default function BookmarkPanel({
             }}
           >
             <option value="added">Sort: Added</option>
-            <option value="time">Sort: Event Time</option>
+            <option value="time">Sort: Time</option>
             <option value="tag">Sort: Tag</option>
           </select>
           <button
@@ -361,14 +455,14 @@ export default function BookmarkPanel({
           </button>
           <button
             onClick={handleClearAll}
-            disabled={bookmarks.length === 0}
+            disabled={allBookmarks.length === 0}
             style={{
               padding: "4px 10px",
               borderRadius: 4,
               background: "rgba(255,68,68,0.1)",
               color: "#ff6666",
               border: "1px solid rgba(255,68,68,0.25)",
-              cursor: bookmarks.length ? "pointer" : "default",
+              cursor: allBookmarks.length ? "pointer" : "default",
               fontSize: "0.8rem",
               marginLeft: "auto",
             }}
@@ -388,18 +482,22 @@ export default function BookmarkPanel({
                 fontSize: "0.9rem",
               }}
             >
-              {bookmarks.length === 0
-                ? "No bookmarks yet. Open an event and click the bookmark icon to save it here."
+              {allBookmarks.length === 0
+                ? "No bookmarks yet. Bookmark events or IOCs to save them here."
                 : "No bookmarks match the selected filter."}
             </p>
           ) : (
-            filtered.map((bk) => {
-              const entry = findEntry(bk);
-              const isEditing = editingIdx === bk.eventIndex;
+            filtered.map((bk, idx) => {
+              const isEventBk = isEventBookmark(bk);
+              const entry = isEventBk ? findEntry(bk) : null;
+              const isEditing = editingIdx === idx;
+              const key = isEventBk
+                ? `evt-${bk.eventIndex}`
+                : `ioc-${bk.ioc}-${bk.iocType}`;
 
               return (
                 <div
-                  key={bk.eventIndex}
+                  key={key}
                   style={{
                     padding: "10px 12px",
                     marginBottom: 8,
@@ -431,11 +529,11 @@ export default function BookmarkPanel({
                       {bk.tag.toUpperCase()}
                     </span>
                     <span style={{ fontSize: "0.75rem", color: "#888" }}>
-                      EID {bk.eventId}
+                      {isEventBk ? `EID ${bk.eventId}` : `IOC: ${bk.ioc}`}
                     </span>
                   </div>
 
-                  {/* Timestamp + source */}
+                  {/* Content based on type */}
                   <div
                     style={{
                       fontSize: "0.8rem",
@@ -443,11 +541,22 @@ export default function BookmarkPanel({
                       marginBottom: 4,
                     }}
                   >
-                    {formatTimestamp(bk.timestamp)}
-                    {entry?.sourceFile && (
-                      <span style={{ color: "#666", marginLeft: 8 }}>
-                        {entry.sourceFile}
-                      </span>
+                    {isEventBk ? (
+                      <>
+                        {formatTimestamp(bk.timestamp)}
+                        {entry?.sourceFile && (
+                          <span style={{ color: "#666", marginLeft: 8 }}>
+                            {entry.sourceFile}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span>{bk.iocType}</span>
+                        <span style={{ color: "#666", marginLeft: 8 }}>
+                          {bk.eventCount} events
+                        </span>
+                      </>
                     )}
                   </div>
 
@@ -504,7 +613,7 @@ export default function BookmarkPanel({
                         cursor: "pointer",
                       }}
                       onClick={() => {
-                        setEditingIdx(bk.eventIndex);
+                        setEditingIdx(idx);
                         setEditNote(bk.note);
                       }}
                       title="Click to edit note"
@@ -561,7 +670,7 @@ export default function BookmarkPanel({
                     {!isEditing && (
                       <button
                         onClick={() => {
-                          setEditingIdx(bk.eventIndex);
+                          setEditingIdx(idx);
                           setEditNote(bk.note);
                         }}
                         style={{
@@ -578,7 +687,7 @@ export default function BookmarkPanel({
                       </button>
                     )}
                     <button
-                      onClick={() => handleRemove(bk.eventIndex)}
+                      onClick={() => handleRemove(bk)}
                       style={{
                         padding: "3px 10px",
                         borderRadius: 4,

@@ -1296,9 +1296,59 @@ export default function IOCExtractor({
                 e.currentTarget.value = "";
               }}
             />
-            <p style={{ fontSize: "0.75rem", color: "#9ca3af", margin: 0 }}>
-              Accepts JSON array or CSV/TSV with columns: type,value,note
-            </p>
+            <details style={{ marginTop: 6 }}>
+              <summary
+                style={{
+                  fontSize: "0.78rem",
+                  color: "#9ca3af",
+                  cursor: "pointer",
+                }}
+              >
+                Feed format instructions (JSON / CSV / TSV)
+              </summary>
+              <div style={{ fontSize: "0.78rem", color: "#d1d5db" }}>
+                <p style={{ margin: "8px 0 6px" }}>
+                  Supported <strong>types</strong>: ip, domain, hash, filepath,
+                  url, email, registry, base64
+                </p>
+                <p style={{ margin: "6px 0" }}>
+                  <strong>JSON</strong>: array of objects with{" "}
+                  <code>type</code>, <code>value</code>, optional{" "}
+                  <code>note</code>
+                </p>
+                <pre
+                  style={{
+                    margin: "6px 0 10px",
+                    padding: 10,
+                    borderRadius: 8,
+                    background: "rgba(0,0,0,0.2)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    overflowX: "auto",
+                  }}
+                >{`[
+  { "type": "ip", "value": "1.2.3.4", "note": "C2" },
+  { "type": "domain", "value": "bad.example", "note": "phishing" },
+  { "type": "hash", "value": "44d88612fea8a8f36de82e1278abb02f" }
+]`}</pre>
+                <p style={{ margin: "6px 0" }}>
+                  <strong>CSV/TSV</strong>: rows with{" "}
+                  <code>type,value,note</code> (header row optional)
+                </p>
+                <pre
+                  style={{
+                    margin: "6px 0 0",
+                    padding: 10,
+                    borderRadius: 8,
+                    background: "rgba(0,0,0,0.2)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    overflowX: "auto",
+                  }}
+                >{`type,value,note
+ip,1.2.3.4,C2
+domain,bad.example,phishing
+url,https://evil.example/a,download`}</pre>
+              </div>
+            </details>
           </div>
 
           <div className="threat-actor-card">

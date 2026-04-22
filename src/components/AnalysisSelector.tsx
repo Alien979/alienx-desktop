@@ -484,7 +484,7 @@ export default function AnalysisSelector({
                 </div>
                 {searchResults.map((entry, i) => (
                   <div
-                    key={i}
+                    key={`${entry.sourceFile || "unknown"}-${entry.timestamp.getTime()}-${i}`}
                     onClick={() => {
                       setSelectedSearchEvent(entry);
                       setSearchOpen(false);

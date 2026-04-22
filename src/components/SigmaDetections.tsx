@@ -14,6 +14,7 @@ import {
   upsertSigmaReviewNote,
   SigmaReviewStatus,
 } from "../lib/sigmaReviewNotes";
+import { isSigmaRuleEnabled, setSigmaRuleEnabled } from "../lib/sigmaRuleToggles";
 // import { THREAT_HUNT_PLAYBOOKS } from "../lib/threatHuntPlaybooks";
 import "./SigmaDetections.css";
 
@@ -140,6 +141,7 @@ export default function SigmaDetections({
   const [draftReview, setDraftReview] = useState<
     Record<string, { status: SigmaReviewStatus; note: string }>
   >({});
+  const [ruleToggleRevision, setRuleToggleRevision] = useState(0);
   // @ts-ignore: variable is kept for future use
   const lastProgressUpdateRef = useRef(0);
 
@@ -178,10 +180,19 @@ export default function SigmaDetections({
   // Run SIGMA matching asynchronously using a Web Worker
   useEffect(() => {
     if (cachedMatches !== undefined && matches.size === 0) {
-      setMatches(cachedMatches);
+      // Filter cached matches against currently enabled rules
+      const filtered = new Map<string, SigmaRuleMatch[]>();
+      for (const [ruleId, ruleMatches] of cachedMatches.entries()) {
+        const sigmaRuleId = ruleMatches[0]?.rule?.id || ruleId;
+        if (!sigmaRuleId) continue;
+        if (!isSigmaRuleEnabled(sigmaRuleId)) continue;
+        filtered.set(ruleId, ruleMatches);
+      }
+
+      setMatches(filtered);
       setIsLoading(false);
       if (onMatchesUpdateRef.current) {
-        onMatchesUpdateRef.current(cachedMatches);
+        onMatchesUpdateRef.current(filtered);
       }
       return;
     }
@@ -196,8 +207,27 @@ export default function SigmaDetections({
     setIsCancelled(false);
     setProgress({ processed: 0, total: events.length, matchesFound: 0 });
 
-    // Prepare rules for worker (decompile to plain objects if needed)
-    const rules = sigmaEngine.getAllRules().map((r) => r); // Shallow copy
+    // Prepare rules for worker - convert Maps to serializable objects
+    const enabledCompiledRules = sigmaEngine
+      .getAllRules()
+      .filter((rule) => isSigmaRuleEnabled(rule.rule.id));
+
+    const rules = enabledCompiledRules.map((rule) => {
+      // Convert Map objects to plain objects for JSON serialization
+      const selectionsObj: Record<string, any> = {};
+      if (rule.selections instanceof Map) {
+        for (const [key, value] of rule.selections.entries()) {
+          selectionsObj[key] = value;
+        }
+      } else if (typeof rule.selections === "object") {
+        Object.assign(selectionsObj, rule.selections);
+      }
+
+      return {
+        ...rule,
+        selections: selectionsObj,
+      };
+    });
 
     // Clean up any previous worker
     if (sigmaWorkerRef.current) {
@@ -227,7 +257,15 @@ export default function SigmaDetections({
     sigmaWorkerRef.current = worker;
 
     worker.onmessage = (e) => {
-      const { type, processed, completed, total, matches, matchesFound, stats } = e.data;
+      const {
+        type,
+        processed,
+        completed,
+        total,
+        matches,
+        matchesFound,
+        stats,
+      } = e.data;
       if (type === "progress") {
         setProgress((prev) => ({
           ...prev,
@@ -247,6 +285,14 @@ export default function SigmaDetections({
       } else if (type === "cancelled") {
         setIsLoading(false);
         setIsCancelled(true);
+      } else if (type === "error") {
+        console.error("Sigma worker error:", e.data.error);
+        setIsLoading(false);
+        setMatches(new Map());
+        setOptimizationStats(null);
+        if (onMatchesUpdateRef.current) {
+          onMatchesUpdateRef.current(new Map());
+        }
       }
     };
 
@@ -276,7 +322,7 @@ export default function SigmaDetections({
         sigmaWorkerRef.current = null;
       }
     };
-  }, [events, sigmaEngine, cachedMatches]);
+  }, [events, sigmaEngine, cachedMatches, ruleToggleRevision]);
 
   // Calculate statistics from matches
   const stats = useMemo(() => {
@@ -434,7 +480,9 @@ export default function SigmaDetections({
   };
 
   // Get total rule count from engine
-  const totalRules = sigmaEngine?.getAllRules().length || 0;
+  const totalRules =
+    sigmaEngine?.getAllRules().filter((r) => isSigmaRuleEnabled(r.rule.id))
+      .length || 0;
 
   return (
     <div className="sigma-detections">
@@ -735,6 +783,39 @@ export default function SigmaDetections({
                           {ruleMatches.length}{" "}
                           {ruleMatches.length === 1 ? "event" : "events"}
                         </span>
+                        <label
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontSize: "0.75rem",
+                            color: "#cbd5e1",
+                            userSelect: "none",
+                            marginRight: 8,
+                          }}
+                          title="Disable to hide and exclude this rule from future scans"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSigmaRuleEnabled(rule.id)}
+                            onChange={(e) => {
+                              const enabled = e.target.checked;
+                              setSigmaRuleEnabled(rule.id, enabled);
+
+                              // Immediately hide/show in UI
+                              setMatches((prev) => {
+                                const next = new Map(prev);
+                                if (!enabled) next.delete(ruleId);
+                                return next;
+                              });
+
+                              // Trigger rescan on next effect run (if enabled again)
+                              setRuleToggleRevision((v) => v + 1);
+                            }}
+                          />
+                          Enabled
+                        </label>
                         <button
                           className="expand-btn"
                           onClick={(e) => {

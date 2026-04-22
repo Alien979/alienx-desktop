@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { FixedSizeList as List } from "react-window";
 import { ParsedData, LogEntry } from "../types";
 import { SigmaRuleMatch } from "../lib/sigma/types";
 import FileFilter from "./FileFilter";
@@ -6,15 +7,24 @@ import FileBreakdownStats from "./FileBreakdownStats";
 import { getFileColor } from "../lib/fileColors";
 import { EventDetailsModal } from "./EventDetailsModal";
 import { EventCompare } from "./EventCompare";
+import { ColumnConfigurator } from "./ColumnConfigurator";
 import {
   getSavedSearchQueries,
   saveSearchQuery,
   deleteSearchQuery,
   SavedSearchQuery,
 } from "../lib/searchPresets";
+import {
+  getSavedColumnConfig,
+  saveColumnConfig,
+  getColumnValue,
+  ColumnDef,
+} from "../lib/columnConfig";
+import { searchInEntry, SearchMatch } from "../lib/searchPreview";
 import "./Dashboard.css";
+import "./RawLogsView.css";
 
-const ROW_HEIGHT = 36; // Fixed height per log row for virtual scrolling
+const ROW_HEIGHT = 36; // Fixed height per log row for virtualization
 const OVERSCAN = 15; // Extra rows rendered above/below viewport for smooth scrolling
 
 interface RawLogsViewProps {
@@ -103,10 +113,16 @@ export default function RawLogsView({
   const [savedSearches, setSavedSearches] = useState<SavedSearchQuery[]>(() =>
     getSavedSearchQueries(),
   );
-  const [scrollTop, setScrollTop] = useState(0);
+  const [showFileBreakdown, setShowFileBreakdown] = useState(false);
+  const [columns, setColumns] = useState<ColumnDef[]>(() =>
+    getSavedColumnConfig(),
+  );
+  const [showColumnConfigurator, setShowColumnConfigurator] = useState(false);
+  const [searchMatches, setSearchMatches] = useState<
+    Map<LogEntry, SearchMatch[]>
+  >(new Map());
 
-  // Ref for the scrollable log container
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<List>(null);
 
   // Modal state for viewing raw event
   const [selectedEvent, setSelectedEvent] = useState<LogEntry | null>(null);
@@ -142,36 +158,6 @@ export default function RawLogsView({
     },
     [compareA, compareB],
   );
-
-  // Build a severity lookup: entry rawLine hash → highest severity from SIGMA matches
-  const severityByEntry = useMemo(() => {
-    const severityOrder: Record<string, number> = {
-      critical: 4,
-      high: 3,
-      medium: 2,
-      low: 1,
-      informational: 0,
-    };
-    const lookup = new Map<LogEntry, string>();
-    for (const matches of sigmaMatches.values()) {
-      for (const m of matches) {
-        if (!m.event) continue;
-        const current = lookup.get(m.event);
-        const level = m.rule.level || "informational";
-        if (
-          !current ||
-          (severityOrder[level] ?? 0) > (severityOrder[current] ?? 0)
-        ) {
-          lookup.set(m.event, level);
-        }
-      }
-    }
-    return lookup;
-  }, [sigmaMatches]);
-
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop(e.currentTarget.scrollTop);
-  }, []);
 
   // Filtered entries
   const filteredEntries = useMemo(() => {
@@ -228,6 +214,55 @@ export default function RawLogsView({
     });
   }, [data.entries, filters, selectedFile, searchQuery, searchRegex]);
 
+  // Build a severity lookup: entry uniqueKey → highest severity from SIGMA matches
+  const severityByEntry = useMemo(() => {
+    const severityOrder: Record<string, number> = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+      informational: 0,
+    };
+    const lookup = new Map<string, string>();
+
+    // Create unique keys for entries to handle filtered/recreated objects
+    const entryKeyMap = new Map<LogEntry, string>();
+    for (const entry of data.entries) {
+      const key = `${entry.rawLine || ""}_${entry.timestamp}`;
+      entryKeyMap.set(entry, key);
+    }
+
+    // Map matches to entry keys
+    for (const matches of sigmaMatches.values()) {
+      for (const m of matches) {
+        if (!m.event) continue;
+        const key =
+          entryKeyMap.get(m.event) ||
+          `${m.event.rawLine || ""}_${m.event.timestamp}`;
+        const current = lookup.get(key);
+        const level = m.rule.level || "informational";
+        if (
+          !current ||
+          (severityOrder[level] ?? 0) > (severityOrder[current] ?? 0)
+        ) {
+          lookup.set(key, level);
+        }
+      }
+    }
+
+    // Create lookup by entry reference for current filtered entries
+    const refLookup = new Map<LogEntry, string>();
+    for (const entry of filteredEntries) {
+      const key = `${entry.rawLine || ""}_${entry.timestamp}`;
+      const severity = lookup.get(key);
+      if (severity) {
+        refLookup.set(entry, severity);
+      }
+    }
+
+    return refLookup;
+  }, [sigmaMatches, filteredEntries, data.entries]);
+
   useEffect(() => {
     if (!searchRegex) {
       setSearchRegexError(null);
@@ -245,25 +280,29 @@ export default function RawLogsView({
     }
   }, [searchRegex, searchQuery]);
 
-  // Virtual scrolling: compute visible window
-  const containerHeight = 600; // matches CSS max-height
-  const totalHeight = filteredEntries.length * ROW_HEIGHT;
-  const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const endIndex = Math.min(
-    filteredEntries.length,
-    Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN,
-  );
-  const visibleEntries = filteredEntries.slice(startIndex, endIndex);
-  const offsetY = startIndex * ROW_HEIGHT;
+  // Calculate search matches with preview context
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchMatches(new Map());
+      return;
+    }
+
+    const matches = new Map<LogEntry, SearchMatch[]>();
+    for (const entry of filteredEntries) {
+      const entryMatches = searchInEntry(entry, searchQuery, searchRegex);
+      if (entryMatches.length > 0) {
+        matches.set(entry, entryMatches);
+      }
+    }
+    setSearchMatches(matches);
+  }, [searchQuery, searchRegex, filteredEntries]);
 
   // Reset scroll when filters change (in effect to avoid side-effect during render)
   const filterKey = `${selectedFile || ""}|${filters
     .map((f) => `${f.field}:${f.value}`)
     .join(",")}|${searchQuery}|${searchRegex}`;
   useEffect(() => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = 0;
-    }
+    listRef.current?.scrollTo(0);
   }, [filterKey]);
 
   // Add a filter
@@ -314,6 +353,11 @@ export default function RawLogsView({
       return;
     }
     setSavedSearches(getSavedSearchQueries());
+  };
+
+  const handleColumnsChange = (newColumns: ColumnDef[]) => {
+    setColumns(newColumns);
+    saveColumnConfig(newColumns);
   };
 
   const exportFiltered = (format: "csv" | "tsv") => {
@@ -448,6 +492,13 @@ export default function RawLogsView({
             </button>
             <button
               className="timeline-button"
+              onClick={() => setShowColumnConfigurator(true)}
+              title="Configure visible columns"
+            >
+              ⚙️ Columns
+            </button>
+            <button
+              className="timeline-button"
               onClick={() => exportFiltered("csv")}
             >
               Export CSV
@@ -521,11 +572,97 @@ export default function RawLogsView({
             </div>
           )}
 
+          {/* Search Result Preview */}
+          {searchMatches.size > 0 && (
+            <div
+              style={{
+                marginBottom: 12,
+                maxHeight: 200,
+                overflowY: "auto",
+                background: "rgba(59,130,246,0.05)",
+                border: "1px solid rgba(59,130,246,0.2)",
+                borderRadius: 8,
+                padding: "8px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.75rem",
+                  color: "#9ca3af",
+                  marginBottom: 6,
+                }}
+              >
+                🔍 {searchMatches.size} entries with matches
+              </div>
+              {Array.from(searchMatches.entries())
+                .slice(0, 5)
+                .map(([_, matches], idx) => (
+                  <div
+                    key={`search-match-${idx}`}
+                    style={{
+                      fontSize: "0.75rem",
+                      marginBottom: 6,
+                      padding: 6,
+                      background: "rgba(0,0,0,0.2)",
+                      borderRadius: 4,
+                      borderLeft: "2px solid #3b82f6",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: "#60a5fa",
+                        fontWeight: 600,
+                        marginBottom: 2,
+                      }}
+                    >
+                      {matches[0].field} • {matches.length} match
+                      {matches.length > 1 ? "es" : ""}
+                    </div>
+                    <div
+                      style={{
+                        color: "#cbd5e1",
+                        fontFamily: "monospace",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                      dangerouslySetInnerHTML={{ __html: matches[0].context }}
+                    />
+                  </div>
+                ))}
+              {searchMatches.size > 5 && (
+                <div
+                  style={{ fontSize: "0.75rem", color: "#9ca3af", padding: 4 }}
+                >
+                  +{searchMatches.size - 5} more...
+                </div>
+              )}
+            </div>
+          )}
+
           {/* File Breakdown Stats */}
-          <FileBreakdownStats
-            entries={data.entries}
-            sourceFiles={data.sourceFiles}
-          />
+          <div
+            onClick={() => setShowFileBreakdown((v) => !v)}
+            style={{
+              cursor: "pointer",
+              fontWeight: 600,
+              margin: "1rem 0 0.25rem 0",
+              display: "flex",
+              alignItems: "center",
+              userSelect: "none",
+            }}
+          >
+            <span style={{ marginRight: 8 }}>
+              {showFileBreakdown ? "▼" : "▶"}
+            </span>
+            Events by File
+          </div>
+          {showFileBreakdown && (
+            <FileBreakdownStats
+              entries={data.entries}
+              sourceFiles={data.sourceFiles}
+            />
+          )}
 
           {/* File Filter */}
           <FileFilter
@@ -554,194 +691,41 @@ export default function RawLogsView({
 
           <div className="log-table-container">
             {/* Column Headers */}
-            <div
-              className={`log-header ${data.format === "evtx" ? "evtx-header" : ""}`}
-            >
-              {data.format === "evtx" ? (
-                <>
+            <div className="log-header">
+              {columns
+                .filter((c) => c.visible)
+                .map((col) => (
                   <div
-                    className={`header-cell ${getFilterForField("timestamp") ? "has-filter" : ""}`}
+                    key={col.id}
+                    className={`log-header-cell ${getFilterForField(col.id) ? "has-filter" : ""}`}
+                    style={{
+                      width: `${col.width}px`,
+                      flexShrink: 0,
+                    }}
                     onClick={() =>
                       setActiveFilterColumn(
-                        activeFilterColumn === "timestamp" ? null : "timestamp",
+                        activeFilterColumn === col.id ? null : col.id,
                       )
                     }
                   >
-                    <span>Timestamp</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
+                    <span>{col.label}</span>
+                    {col.filterable && (
+                      <svg
+                        className="filter-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                      >
+                        <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
+                      </svg>
+                    )}
                   </div>
-                  <div
-                    className={`header-cell ${getFilterForField("computer") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "computer" ? null : "computer",
-                      )
-                    }
-                  >
-                    <span>Computer</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div
-                    className={`header-cell ${getFilterForField("eventId") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "eventId" ? null : "eventId",
-                      )
-                    }
-                  >
-                    <span>Event ID</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div
-                    className={`header-cell ${getFilterForField("source") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "source" ? null : "source",
-                      )
-                    }
-                  >
-                    <span>Source</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div
-                    className={`header-cell ${getFilterForField("message") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "message" ? null : "message",
-                      )
-                    }
-                  >
-                    <span>Message</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div className="header-cell action-header">
-                    <span>Actions</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div
-                    className={`header-cell ${getFilterForField("timestamp") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "timestamp" ? null : "timestamp",
-                      )
-                    }
-                  >
-                    <span>Timestamp</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div
-                    className={`header-cell ${getFilterForField("ip") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "ip" ? null : "ip",
-                      )
-                    }
-                  >
-                    <span>IP Address</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div
-                    className={`header-cell ${getFilterForField("statusCode") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "statusCode"
-                          ? null
-                          : "statusCode",
-                      )
-                    }
-                  >
-                    <span>Status</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div
-                    className={`header-cell ${getFilterForField("method") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "method" ? null : "method",
-                      )
-                    }
-                  >
-                    <span>Method</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div
-                    className={`header-cell ${getFilterForField("path") ? "has-filter" : ""}`}
-                    onClick={() =>
-                      setActiveFilterColumn(
-                        activeFilterColumn === "path" ? null : "path",
-                      )
-                    }
-                  >
-                    <span>Path</span>
-                    <svg
-                      className="filter-icon"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M3 4h18v2H3V4zm3 7h12v2H6v-2zm3 7h6v2H9v-2z" />
-                    </svg>
-                  </div>
-                  <div className="header-cell action-header">
-                    <span>Actions</span>
-                  </div>
-                </>
-              )}
+                ))}
+              <div
+                className="log-header-cell action-header"
+                style={{ minWidth: "80px" }}
+              >
+                <span>Actions</span>
+              </div>
             </div>
 
             {/* Filter Popup */}
@@ -797,44 +781,67 @@ export default function RawLogsView({
             )}
 
             {/* Log Entries - Virtual Scrolling */}
-            <div
-              className="log-entries"
-              ref={scrollContainerRef}
-              onScroll={handleScroll}
-            >
+            <div className="log-entries">
               {filteredEntries.length === 0 ? (
                 <div className="log-entry-more">
                   No entries match the current filters
                 </div>
               ) : (
-                <div style={{ height: totalHeight, position: "relative" }}>
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      transform: `translateY(${offsetY}px)`,
-                    }}
-                  >
-                    {visibleEntries.map((entry, idx) => {
-                      const severity = severityByEntry.get(entry);
-                      const severityColors: Record<string, string> = {
-                        critical: "rgba(239,68,68,0.12)",
-                        high: "rgba(249,115,22,0.10)",
-                        medium: "rgba(234,179,8,0.08)",
-                        low: "rgba(34,197,94,0.06)",
-                      };
-                      const severityBorder: Record<string, string> = {
-                        critical: "#ef4444",
-                        high: "#f97316",
-                        medium: "#eab308",
-                        low: "#22c55e",
-                      };
-                      return (
+                <List
+                  ref={listRef}
+                  height={600}
+                  itemCount={filteredEntries.length}
+                  itemSize={ROW_HEIGHT}
+                  width="100%"
+                  overscanCount={OVERSCAN}
+                  itemKey={(index) => {
+                    const e = filteredEntries[index];
+                    return `${index}-${String(e.eventId || "")}-${String(e.timestamp || "")}-${e.sourceFile || ""}`;
+                  }}
+                  itemData={{
+                    entries: filteredEntries,
+                    data,
+                    columns,
+                    sigmaMatches,
+                    severityByEntry,
+                    compareA,
+                    compareB,
+                    handleViewEvent,
+                    handleToggleCompare,
+                  }}
+                >
+                  {({
+                    index,
+                    style,
+                    data: rowData,
+                  }: ListChildComponentProps) => {
+                    const entry = (rowData as any).entries[index] as LogEntry;
+                    const severity = (rowData as any).severityByEntry.get(
+                      entry,
+                    );
+                    const severityColors: Record<string, string> = {
+                      critical: "rgba(239,68,68,0.12)",
+                      high: "rgba(249,115,22,0.10)",
+                      medium: "rgba(234,179,8,0.08)",
+                      low: "rgba(34,197,94,0.06)",
+                    };
+                    const severityBorder: Record<string, string> = {
+                      critical: "#ef4444",
+                      high: "#f97316",
+                      medium: "#eab308",
+                      low: "#22c55e",
+                    };
+
+                    return (
+                      <div
+                        style={{
+                          ...style,
+                          height: ROW_HEIGHT,
+                          boxSizing: "border-box",
+                        }}
+                      >
                         <div
-                          key={startIndex + idx}
-                          className={`log-entry ${data.format === "evtx" ? "evtx-entry" : ""}`}
+                          className={`log-entry ${rowData.data && rowData.data.format === "evtx" ? "evtx-entry" : ""}`}
                           style={{
                             height: ROW_HEIGHT,
                             boxSizing: "border-box",
@@ -846,8 +853,9 @@ export default function RawLogsView({
                                 }
                               : {}),
                             ...(entry.sourceFile &&
-                            data.sourceFiles &&
-                            data.sourceFiles.length > 1
+                            rowData.data &&
+                            rowData.data.sourceFiles &&
+                            rowData.data.sourceFiles.length > 1
                               ? {
                                   borderLeft: `3px solid ${getFileColor(entry.sourceFile)}`,
                                 }
@@ -857,107 +865,76 @@ export default function RawLogsView({
                             severity ? `SIGMA: ${severity} severity` : undefined
                           }
                         >
-                          <span className="log-time">
-                            {entry.timestamp instanceof Date &&
-                            !isNaN(entry.timestamp.getTime())
-                              ? entry.timestamp.toLocaleString()
-                              : "—"}
-                          </span>
-                          {data.format === "evtx" ? (
-                            <>
-                              <span className="log-computer">
-                                {entry.computer || "N/A"}
-                              </span>
-                              <span className="log-event-id">
-                                {entry.eventId}
-                              </span>
-                              <span className="log-source">{entry.source}</span>
-                              <span
-                                className="log-message"
-                                title={entry.message}
-                              >
-                                {entry.message || "No message"}
-                              </span>
-                              <span className="log-action">
-                                <button
-                                  className="view-details-btn"
-                                  onClick={() => handleViewEvent(entry)}
-                                  title="View complete event details"
-                                >
-                                  👁️
-                                </button>
-                                <button
-                                  className="view-details-btn"
-                                  onClick={() => handleToggleCompare(entry)}
-                                  title={
-                                    compareA === entry || compareB === entry
-                                      ? "Remove from comparison"
-                                      : "Add to comparison"
-                                  }
+                          {rowData.columns
+                            .filter((c: ColumnDef) => c.visible)
+                            .map((col: ColumnDef) => {
+                              const cellValue = getColumnValue(
+                                entry,
+                                col,
+                                rowData.sigmaMatches,
+                              );
+                              const cellTypeCss = `log-cell type-${col.type}`;
+                              return (
+                                <div
+                                  key={col.id}
+                                  className={cellTypeCss}
                                   style={{
-                                    marginLeft: 2,
-                                    opacity:
-                                      compareA === entry || compareB === entry
-                                        ? 1
-                                        : 0.5,
-                                    color:
-                                      compareA === entry || compareB === entry
-                                        ? "#a855f7"
-                                        : undefined,
+                                    width: `${col.width}px`,
+                                    flexShrink: 0,
                                   }}
-                                >
-                                  ⚖️
-                                </button>
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="log-ip">{entry.ip}</span>
-                              <span
-                                className={`log-status status-${Math.floor(entry.statusCode / 100)}xx`}
-                              >
-                                {entry.statusCode}
-                              </span>
-                              <span className="log-method">{entry.method}</span>
-                              <span className="log-path">{entry.path}</span>
-                              <span className="log-action">
-                                <button
-                                  className="view-details-btn"
-                                  onClick={() => handleViewEvent(entry)}
-                                  title="View complete event details"
-                                >
-                                  👁️
-                                </button>
-                                <button
-                                  className="view-details-btn"
-                                  onClick={() => handleToggleCompare(entry)}
                                   title={
-                                    compareA === entry || compareB === entry
-                                      ? "Remove from comparison"
-                                      : "Add to comparison"
+                                    typeof cellValue === "string" &&
+                                    cellValue.length > 30
+                                      ? cellValue
+                                      : undefined
                                   }
-                                  style={{
-                                    marginLeft: 2,
-                                    opacity:
-                                      compareA === entry || compareB === entry
-                                        ? 1
-                                        : 0.5,
-                                    color:
-                                      compareA === entry || compareB === entry
-                                        ? "#a855f7"
-                                        : undefined,
-                                  }}
                                 >
-                                  ⚖️
-                                </button>
-                              </span>
-                            </>
-                          )}
+                                  {cellValue}
+                                </div>
+                              );
+                            })}
+                          <div
+                            className="log-cell"
+                            style={{ minWidth: "80px" }}
+                          >
+                            <button
+                              className="view-details-btn"
+                              onClick={() => rowData.handleViewEvent(entry)}
+                              title="View complete event details"
+                            >
+                              👁️
+                            </button>
+                            <button
+                              className="view-details-btn"
+                              onClick={() => rowData.handleToggleCompare(entry)}
+                              title={
+                                rowData.compareA === entry ||
+                                rowData.compareB === entry
+                                  ? "Remove from comparison"
+                                  : "Add to comparison"
+                              }
+                              style={{
+                                marginLeft: 2,
+                                opacity:
+                                  rowData.compareA === entry ||
+                                  rowData.compareB === entry
+                                    ? 1
+                                    : 0.5,
+                                color:
+                                  rowData.compareA === entry ||
+                                  rowData.compareB === entry
+                                    ? "#a855f7"
+                                    : undefined,
+                              }}
+                            >
+                              ⚖️
+                            </button>
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                      </div>
+                    );
+                  }}
+                </List>
               )}
             </div>
           </div>
@@ -970,6 +947,15 @@ export default function RawLogsView({
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       />
+
+      {/* Column Configurator Modal */}
+      {showColumnConfigurator && (
+        <ColumnConfigurator
+          columns={columns}
+          onColumnsChange={handleColumnsChange}
+          onClose={() => setShowColumnConfigurator(false)}
+        />
+      )}
 
       {/* Comparison floating bar */}
       {(compareA || compareB) && !showCompare && (

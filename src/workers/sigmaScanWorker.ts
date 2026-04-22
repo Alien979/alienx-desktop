@@ -4,26 +4,47 @@ import { CompiledSigmaRule } from "../lib/sigma/types";
 
 let cancelled = false;
 
+function reviveCompiledRules(rawRules: any[]): CompiledSigmaRule[] {
+  return (rawRules || []).map((rule: any) => {
+    const selectionsRaw = rule?.selections;
+    const selections =
+      selectionsRaw instanceof Map
+        ? selectionsRaw
+        : new Map<string, any>(
+            selectionsRaw && typeof selectionsRaw === "object"
+              ? Object.entries(selectionsRaw)
+              : [],
+          );
+
+    return {
+      ...rule,
+      selections,
+    } as CompiledSigmaRule;
+  });
+}
+
 self.onmessage = async (e) => {
   const { type, payload } = e.data;
   if (type === "start") {
     cancelled = false;
     const { entries, rules } = payload;
     try {
+      const revivedRules = reviveCompiledRules(rules as any[]);
+
       // Use optimized batch matcher with progress callback
       const { matches, stats } = await processEventsOptimized(
         entries,
-        rules as CompiledSigmaRule[],
-        (completed: number, total: number) => {
+        revivedRules,
+        (completed: number, total: number, partialStats) => {
           if (!cancelled) {
             self.postMessage({
               type: "progress",
               completed,
               total,
-              matchesFound: Array.from(matches.values()).reduce(
-                (sum, m) => sum + (m as any).length,
-                0,
-              ),
+              matchesFound:
+                typeof partialStats?.matchesFound === "number"
+                  ? partialStats.matchesFound
+                  : 0,
             });
           }
         },

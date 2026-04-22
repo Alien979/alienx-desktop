@@ -10,6 +10,13 @@ import {
   getIOCTypeIcon,
 } from "../lib/iocSearchEngine";
 import { getFileColor, getFileBgColor } from "../lib/fileColors";
+import {
+  addIOCBookmark,
+  removeIOCBookmark,
+  getIOCBookmark,
+  BookmarkTag,
+  BOOKMARK_TAGS,
+} from "../lib/eventBookmarks";
 import "./IOCPivotView.css";
 
 const IOC_PAGE_SIZE = 100;
@@ -45,6 +52,11 @@ export function IOCPivotView({
   const [typeEventsVisible, setTypeEventsVisible] = useState<
     Record<string, number>
   >({});
+  const [bookmarkVersion, setBookmarkVersion] = useState(0);
+  const [isBookmarking, setIsBookmarking] = useState(false);
+  const [bookmarkNote, setBookmarkNote] = useState("");
+  const [selectedBookmarkTag, setSelectedBookmarkTag] =
+    useState<BookmarkTag>("investigate");
 
   // Perform the search
   const searchResult = useMemo<IOCSearchResult | null>(() => {
@@ -56,6 +68,11 @@ export function IOCPivotView({
       setIsSearching(false);
     }
   }, [ioc, type, entries, sigmaMatches]);
+
+  // Check if IOC is bookmarked
+  const currentBookmark = useMemo(() => {
+    return getIOCBookmark(ioc, type);
+  }, [ioc, type, bookmarkVersion]);
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -93,6 +110,33 @@ export function IOCPivotView({
     if (!timestamp) return "Unknown";
     const date = new Date(timestamp);
     return date.toLocaleString();
+  };
+
+  // Handle bookmark toggle
+  const handleToggleBookmark = () => {
+    if (currentBookmark) {
+      removeIOCBookmark(ioc, type);
+    } else {
+      setIsBookmarking(true);
+    }
+    setBookmarkVersion((v) => v + 1);
+  };
+
+  // Handle save bookmark
+  const handleSaveBookmark = () => {
+    const eventCount = searchResult?.totalMatches || 0;
+    addIOCBookmark({
+      ioc,
+      iocType: type,
+      eventCount,
+      note: bookmarkNote,
+      tag: selectedBookmarkTag,
+      createdAt: new Date().toISOString(),
+    });
+    setIsBookmarking(false);
+    setBookmarkNote("");
+    setSelectedBookmarkTag("investigate");
+    setBookmarkVersion((v) => v + 1);
   };
 
   // Render stats bar
@@ -468,13 +512,120 @@ export function IOCPivotView({
               <span className="pivot-ioc-type">{getIOCTypeLabel(type)}</span>
             </div>
           </div>
-          <button
-            className="pivot-close-btn"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {isBookmarking ? (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  background: "rgba(100,200,255,0.1)",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(100,200,255,0.2)",
+                }}
+              >
+                <select
+                  value={selectedBookmarkTag}
+                  onChange={(e) =>
+                    setSelectedBookmarkTag(e.target.value as BookmarkTag)
+                  }
+                  style={{
+                    padding: "4px 6px",
+                    borderRadius: 3,
+                    background: "#1e1e2e",
+                    color: "#eee",
+                    border: "1px solid #555",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  {BOOKMARK_TAGS.map((tag) => (
+                    <option key={tag.value} value={tag.value}>
+                      {tag.icon} {tag.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={bookmarkNote}
+                  onChange={(e) => setBookmarkNote(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveBookmark();
+                    if (e.key === "Escape") setIsBookmarking(false);
+                  }}
+                  placeholder="Add note..."
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: 3,
+                    background: "#1a1a2e",
+                    border: "1px solid #555",
+                    color: "#eee",
+                    fontSize: "0.8rem",
+                    minWidth: 150,
+                  }}
+                />
+                <button
+                  onClick={handleSaveBookmark}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 3,
+                    background: "rgba(68,187,68,0.2)",
+                    color: "#44bb44",
+                    border: "1px solid rgba(68,187,68,0.4)",
+                    cursor: "pointer",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setIsBookmarking(false)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 3,
+                    background: "rgba(255,100,100,0.2)",
+                    color: "#ff6666",
+                    border: "1px solid rgba(255,100,100,0.4)",
+                    cursor: "pointer",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleToggleBookmark}
+                title={
+                  currentBookmark
+                    ? "Remove bookmark"
+                    : "Bookmark this IOC for later"
+                }
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 4,
+                  background: currentBookmark
+                    ? "rgba(200,150,255,0.2)"
+                    : "rgba(100,100,100,0.1)",
+                  color: currentBookmark ? "#e4b5ff" : "#aaa",
+                  border: currentBookmark
+                    ? "1px solid rgba(200,150,255,0.4)"
+                    : "1px solid rgba(100,100,100,0.2)",
+                  cursor: "pointer",
+                  fontSize: "0.9rem",
+                }}
+              >
+                {currentBookmark ? "🔖" : "🔖"} Bookmark
+              </button>
+            )}
+            <button
+              className="pivot-close-btn"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Stats */}
