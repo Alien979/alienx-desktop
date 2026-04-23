@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
-import { FixedSizeList as List } from "react-window";
+import { FixedSizeList as List, ListChildComponentProps } from "react-window";
 import { ParsedData, LogEntry } from "../types";
 import { SigmaRuleMatch } from "../lib/sigma/types";
 import FileFilter from "./FileFilter";
@@ -794,7 +794,7 @@ export default function RawLogsView({
                   itemSize={ROW_HEIGHT}
                   width="100%"
                   overscanCount={OVERSCAN}
-                  itemKey={(index) => {
+                  itemKey={(index: number) => {
                     const e = filteredEntries[index];
                     return `${index}-${String(e.eventId || "")}-${String(e.timestamp || "")}-${e.sourceFile || ""}`;
                   }}
